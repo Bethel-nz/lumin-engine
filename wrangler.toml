@@ -1,0 +1,21 @@
+
+name = "lumin"
+main = "src/index.ts"
+compatibility_date = "2025-02-24" # Today’s date
+workers_dev = true 
+account_id = "0095f5e80c93e8252a4019ae095d6848"
+
+# Observability (logs, traces in dashboard)
+[observability]
+enabled = true
+
+# D1 Database binding for edge SQLite
+[[d1_databases]]
+binding = "DB"
+database_name = "lumin-db"
+database_id = "04e9af85-e7bb-4930-abac-354c8a120232"
+
+[vars]
+OPENAI_KEY = ""
+VECTOR_URL=""
+VECTOR_TOKEN=""
