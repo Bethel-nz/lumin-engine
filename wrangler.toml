@@ -1,7 +1,6 @@
-
 name = "lumin"
 main = "src/index.ts"
-compatibility_date = "2025-02-24" # Today’s date
+compatibility_date = "2025-02-24" # Today's date
 workers_dev = true 
 account_id = "0095f5e80c93e8252a4019ae095d6848"
 
@@ -13,9 +12,14 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "lumin-db"
-database_id = "04e9af85-e7bb-4930-abac-354c8a120232"
+database_id = "your-d1-namespace-id"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "your_kv_namespace_id"
 
 [vars]
-OPENAI_KEY = ""
-VECTOR_URL=""
-VECTOR_TOKEN=""
+VECTOR_URL = ""
+VECTOR_TOKEN = ""
+MOBILE_APP_KEY = ""
+OPENAI_API_KEY = ""
