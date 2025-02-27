@@ -106,3 +106,4 @@ Search events by keyword query, returns vector similarity matches.
 - KV for caching and A/B testing
 - Scheduled tag vector updates
 
+view full architecture [here](https://excalidraw.com/#json=T0FgGo0V8KY4nhcWL2IHG,TX5w1r5KBh0glXcOy84EHw)
