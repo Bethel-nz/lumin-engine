@@ -2,7 +2,10 @@
   "name": "lumin",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --minify"
+    "deploy": "wrangler deploy --minify",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@upstash/vector": "^1.2.0",
@@ -15,6 +18,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",
+    "@vitest/coverage-v8": "^3.1.2",
+    "vitest": "^3.1.2",
     "wrangler": "^3.109.2"
   }
 }
