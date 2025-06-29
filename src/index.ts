@@ -100,6 +100,20 @@ const generateHash = (data: string): string => {
   return hashSync(data, 8);
 };
 
+const captureWorkerError = <T>(
+  error: Error,
+  context?: Record<string, T>
+): void => {
+  // biome-ignore lint/suspicious/noConsole: Worker logging for monitoring
+  console.error(`Worker Error: ${error.message}`, {
+    error: error.stack,
+    ...context,
+  });
+
+  // TODO: Send to monitoring service (e.g., Sentry, Datadog, etc.)
+  // This could be implemented with fetch to external monitoring APIs
+};
+
 const hashCode = (str: string): number => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -514,6 +528,47 @@ app.get('/search', async (c) => {
   }
 });
 
+async function buildInteractionVector(
+  interactions: Omit<InteractionResult, 'total_weight' | 'latest'>[],
+  vectorIndex: Index,
+  openai: OpenAI
+): Promise<number[]> {
+  if (!interactions.length) return new Array(EMBEDDING_DIMENSIONS).fill(0);
+
+  const eventIds = [...new Set(interactions.map((r) => r.event_id))];
+  const eventVectors = await fetchEventVectors(vectorIndex, eventIds);
+
+  const interactionTextParts: string[] = [];
+  for (const r of interactions) {
+    const vectorData = eventVectors[r.event_id];
+    const metadata = vectorData?.metadata as VectorMetadata | undefined;
+    if (metadata?.tags) {
+      interactionTextParts.push(`${metadata.tags.join(' ')} ${r.action}`);
+    }
+  }
+
+  return interactionTextParts.length > 0
+    ? await generateEmbedding(interactionTextParts.join(' . '), openai)
+    : new Array(EMBEDDING_DIMENSIONS).fill(0);
+}
+
+function combineVectors(
+  interactionVector: number[],
+  tagVector: number[],
+  hasInteractions: boolean,
+  hasTags: boolean
+): number[] {
+  if (!hasInteractions && !hasTags)
+    return new Array(EMBEDDING_DIMENSIONS).fill(0);
+  if (!hasInteractions) return tagVector;
+  if (!hasTags) return interactionVector;
+
+  const tagInfluence = 0.3;
+  return interactionVector.map(
+    (v, i) => v * (1 - tagInfluence) + tagVector[i] * tagInfluence
+  );
+}
+
 async function computeUserVector(
   userId: string,
   env: EnvBindings,
@@ -531,52 +586,19 @@ async function computeUserVector(
   const cachedTags = await env.CACHE.get(`user_tags:${userId}`);
   const selectedTags: string[] = cachedTags ? JSON.parse(cachedTags) : [];
 
-  if (!interactionsResult.results.length && !selectedTags.length) {
-    return new Array(EMBEDDING_DIMENSIONS).fill(0);
-  }
+  const [interactionVector, tagVector] = await Promise.all([
+    buildInteractionVector(interactionsResult.results, vectorIndex, openai),
+    selectedTags.length
+      ? generateEmbedding(selectedTags.join(' '), openai)
+      : Promise.resolve(new Array(EMBEDDING_DIMENSIONS).fill(0)),
+  ]);
 
-  let interactionVector = new Array(EMBEDDING_DIMENSIONS).fill(0);
-  let tagVector = new Array(EMBEDDING_DIMENSIONS).fill(0);
-
-  if (interactionsResult.results.length) {
-    const eventIds = [
-      ...new Set(interactionsResult.results.map((r) => r.event_id)),
-    ];
-    const eventVectors = await fetchEventVectors(vectorIndex, eventIds);
-
-    const interactionTextParts: string[] = [];
-    for (const r of interactionsResult.results) {
-      const vectorData = eventVectors[r.event_id];
-      const metadata = vectorData?.metadata as VectorMetadata | undefined;
-      if (metadata?.tags) {
-        interactionTextParts.push(`${metadata.tags.join(' ')} ${r.action}`);
-      }
-    }
-
-    if (interactionTextParts.length > 0) {
-      interactionVector = await generateEmbedding(
-        interactionTextParts.join(' . '),
-        openai
-      );
-    }
-  }
-
-  if (selectedTags.length) {
-    tagVector = await generateEmbedding(selectedTags.join(' '), openai);
-  }
-
-  const tagInfluence = selectedTags.length > 0 ? 0.3 : 0;
-  const interactionInfluence = interactionsResult.results.length > 0 ? 1.0 : 0;
-
-  if (interactionInfluence > 0 && tagInfluence > 0) {
-    return interactionVector.map(
-      (v, i) => v * (1 - tagInfluence) + tagVector[i] * tagInfluence
-    );
-  }
-  if (interactionInfluence > 0) {
-    return interactionVector;
-  }
-  return tagVector;
+  return combineVectors(
+    interactionVector,
+    tagVector,
+    interactionsResult.results.length > 0,
+    selectedTags.length > 0
+  );
 }
 
 async function updateSingleTagVector(
@@ -700,10 +722,10 @@ export default {
           ctx.waitUntil(updateSingleTagVector(tag, env, vectorIndex));
         }
       } catch (error) {
-        // Error handling could send to monitoring service
-
-        // biome-ignore lint/suspicious/noConsole: Dev Logging
-        console.error('Error during scheduled tag vector update:', error);
+        captureWorkerError(error as Error, {
+          context: 'scheduled-tag-vector-update',
+          cron: controller.cron,
+        });
       }
     }
   },
