@@ -19,6 +19,12 @@ interface EnvBindings {
   OPENAI_API_KEY: string;
 }
 
+interface UserDemographics {
+  // Example demographic fields
+  country: string | null;
+  interests: string[];
+}
+
 interface Interaction {
   user_id: string;
   event_id: string;
@@ -50,6 +56,30 @@ interface EnrichedRecommendation {
   diversified: boolean;
 }
 
+interface TemporalPattern {
+  hour: number;
+  day_of_week: number;
+  interaction_count: number;
+  like_rate: number;
+}
+
+interface UserBehaviorProfile {
+  user_id: string;
+  interaction_velocity: number;
+  tag_diversity: number;
+  engagement_depth: number;
+  preferred_times: number[];
+  social_level: number;
+  exploration_success_rate: number;
+}
+
+interface ExplorationItem {
+  event_id: string;
+  score: number;
+  exploration_type: 'temporal' | 'anti_correlated' | 'trending' | 'serendipity';
+  confidence: number;
+}
+
 const WEIGHTS: Record<string, number> = {
   click: 1,
   like: 2,
@@ -59,8 +89,8 @@ const WEIGHTS: Record<string, number> = {
   signup: 0,
 };
 
-const EMBEDDING_MODEL = 'text-embedding-ada-002';
-const EMBEDDING_DIMENSIONS = 1536;
+const EMBEDDING_MODEL = 'text-embedding-3-large';
+const EMBEDDING_DIMENSIONS = 3072;
 
 const app = new Hono<{ Bindings: EnvBindings }>();
 
@@ -185,11 +215,12 @@ const generateEmbedding = async (
     const { data } = await withRetry(() =>
       openai.embeddings.create({
         model: EMBEDDING_MODEL,
-        input: text,
+        input: text.trim(),
       })
     );
     return data[0]?.embedding ?? new Array(EMBEDDING_DIMENSIONS).fill(0);
   } catch (error) {
+    captureWorkerError(error as Error, { context: 'generateEmbedding', text });
     return new Array(EMBEDDING_DIMENSIONS).fill(0);
   }
 };
@@ -203,6 +234,22 @@ const checkUserExists = async (
     .bind(userId)
     .first();
   return !!result;
+};
+
+const getUserDemographics = async (
+  db: D1Database,
+  userId: string
+): Promise<UserDemographics | null> => {
+  const result = await db
+    .prepare('SELECT country, interests FROM user_profiles WHERE user_id = ?')
+    .bind(userId)
+    .first();
+  return result
+    ? {
+        country: result?.country as string | null,
+        interests: result?.interests as string[],
+      }
+    : null;
 };
 
 const insertInteraction = async (
@@ -321,7 +368,8 @@ app.post('/ingest-event', async (c) => {
     const vectorIndex = getVectorIndex(c);
     const openai = getOpenAIClient(c);
 
-    const embeddingText = `${title} ${tags.join(' ')}`;
+    // **ENHANCEMENT**: Include host in the embedding text for richer item representation.
+    const embeddingText = `${title} ${tags.join(' ')} ${host ? `hosted by ${host}` : ''}`;
     const vector = await generateEmbedding(embeddingText, openai);
 
     if (vector.every((v) => v === 0)) {
@@ -403,7 +451,8 @@ app.get('/get-recommendations/:userId', userRateLimiter, async (c) => {
     const initialTopK = abGroup === 'A' ? 40 : 50;
     const useDiversification = abGroup === 'A';
 
-    const userVector = await computeUserVector(
+    // **ENHANCEMENT**: Use the new hybrid vector computation.
+    const userVector = await computeHybridUserVector(
       userId,
       c.env,
       openai,
@@ -411,7 +460,13 @@ app.get('/get-recommendations/:userId', userRateLimiter, async (c) => {
     );
 
     if (userVector.every((v) => v === 0)) {
-      return c.json([]);
+      // Return trending items as a fallback for new users or users with no vector
+      const trending = await getTrendingItems(c.env, 15);
+      const trendingRecs = trending.map((item) => ({
+        ...item,
+        diversified: false,
+      }));
+      return c.json(trendingRecs);
     }
 
     const queryResults = await withRetry(() =>
@@ -440,7 +495,10 @@ app.get('/get-recommendations/:userId', userRateLimiter, async (c) => {
       return c.json([]);
     }
 
-    let finalRecs = filteredCandidates;
+    let finalRecs = filteredCandidates.map((r) => ({
+      ...r,
+      diversified: false,
+    }));
     const targetDiversificationCount = 8 + 2;
     if (useDiversification && finalRecs.length >= targetDiversificationCount) {
       const diverseSelection = finalRecs
@@ -454,12 +512,29 @@ app.get('/get-recommendations/:userId', userRateLimiter, async (c) => {
       finalRecs = finalRecs.slice(0, 15);
     }
 
-    const enriched: EnrichedRecommendation[] = finalRecs.map((r) => ({
+    // Convert to EnrichedRecommendation format first
+    let enriched: EnrichedRecommendation[] = finalRecs.map((r) => ({
       event_id: r.id.toString(),
       score: r.score,
-      diversified:
-        (r as Vector & { diversified?: boolean }).diversified ?? false,
+      diversified: r.diversified,
     }));
+
+    // **INTEGRATION**: Inject exploration items into the recommendation list.
+    const explorationRate = await getExplorationRate(userId, c.env);
+    if (Math.random() < explorationRate) {
+      const explorationItems = await Promise.all([
+        getAntiCorrelatedRecommendations(userVector, vectorIndex, 1),
+        getSerendipityItems(userId, vectorIndex, c.env, 1),
+        getTrendingItems(c.env, 1),
+      ]);
+      enriched = injectExploration(
+        enriched,
+        explorationItems.flat(),
+        explorationRate
+      );
+    }
+
+    await trackExplorationSuccess(userId, enriched, c.env);
 
     const newRecsStr = JSON.stringify(enriched);
     const newHash = generateHash(newRecsStr);
@@ -483,6 +558,7 @@ app.get('/get-recommendations/:userId', userRateLimiter, async (c) => {
 
     return c.json(enriched);
   } catch (e: unknown) {
+    captureWorkerError(e as Error, { context: 'get-recommendations' });
     return handleError(c, e, 'Failed to get recommendations', 500);
   }
 });
@@ -552,24 +628,81 @@ async function buildInteractionVector(
     : new Array(EMBEDDING_DIMENSIONS).fill(0);
 }
 
+// **NEW**: Combines multiple vectors with specified weights for the hybrid model.
 function combineVectors(
-  interactionVector: number[],
-  tagVector: number[],
-  hasInteractions: boolean,
-  hasTags: boolean
+  vectors: { vector: number[]; weight: number }[]
 ): number[] {
-  if (!hasInteractions && !hasTags)
-    return new Array(EMBEDDING_DIMENSIONS).fill(0);
-  if (!hasInteractions) return tagVector;
-  if (!hasTags) return interactionVector;
+  const totalWeight = vectors.reduce((sum, v) => sum + v.weight, 0);
+  if (totalWeight === 0) return new Array(EMBEDDING_DIMENSIONS).fill(0);
 
-  const tagInfluence = 0.3;
-  return interactionVector.map(
-    (v, i) => v * (1 - tagInfluence) + tagVector[i] * tagInfluence
+  const finalVector = new Array(EMBEDDING_DIMENSIONS).fill(0);
+
+  for (const { vector, weight } of vectors) {
+    if (vector.length === EMBEDDING_DIMENSIONS) {
+      for (let i = 0; i < EMBEDDING_DIMENSIONS; i++) {
+        finalVector[i] += vector[i] * (weight / totalWeight);
+      }
+    }
+  }
+  return finalVector;
+}
+
+// **NEW**: Implements the collaborative filtering part of the model.
+async function getCollaborativeVector(
+  userId: string,
+  env: EnvBindings,
+  openai: OpenAI,
+  vectorIndex: Index
+): Promise<number[]> {
+  // Find users who interacted with the same events as the current user
+  const similarUsersQuery = await env.DB.prepare(
+    `SELECT
+            i2.user_id,
+            COUNT(i1.event_id) as common_interactions
+        FROM interactions i1
+        JOIN interactions i2 ON i1.event_id = i2.event_id AND i1.user_id != i2.user_id
+        WHERE i1.user_id = ? AND i1.action IN ('like', 'click')
+        GROUP BY i2.user_id
+        ORDER BY common_interactions DESC
+        LIMIT 5`
+  )
+    .bind(userId)
+    .all<{ user_id: string; common_interactions: number }>();
+
+  if (!similarUsersQuery.results || similarUsersQuery.results.length === 0) {
+    return new Array(EMBEDDING_DIMENSIONS).fill(0);
+  }
+
+  // For the top similar users, get their recent liked/clicked items
+  const similarUserIds = similarUsersQuery.results.map((u) => u.user_id);
+  const placeholders = similarUserIds.map(() => '?').join(',');
+
+  const similarInteractionsQuery = await env.DB.prepare(
+    `SELECT event_id, action FROM interactions
+        WHERE user_id IN (${placeholders}) AND action IN ('like', 'click')
+        ORDER BY timestamp DESC
+        LIMIT 30`
+  )
+    .bind(...similarUserIds)
+    .all<Omit<InteractionResult, 'total_weight' | 'latest'>>();
+
+  if (
+    !similarInteractionsQuery.results ||
+    similarInteractionsQuery.results.length === 0
+  ) {
+    return new Array(EMBEDDING_DIMENSIONS).fill(0);
+  }
+
+  // Build a single vector representing the preferences of the similar user group
+  return buildInteractionVector(
+    similarInteractionsQuery.results,
+    vectorIndex,
+    openai
   );
 }
 
-async function computeUserVector(
+// **ENHANCEMENT**: Computes a hybrid vector from content, collaborative, and explicit signals.
+async function computeHybridUserVector(
   userId: string,
   env: EnvBindings,
   openai: OpenAI,
@@ -586,19 +719,34 @@ async function computeUserVector(
   const cachedTags = await env.CACHE.get(`user_tags:${userId}`);
   const selectedTags: string[] = cachedTags ? JSON.parse(cachedTags) : [];
 
-  const [interactionVector, tagVector] = await Promise.all([
+  // Get user demographics
+  const demographics = await getUserDemographics(env.DB, userId);
+  const demographicsText = demographics
+    ? `${demographics.country} ${demographics.interests.join(' ')}`
+    : '';
+
+  const [
+    interactionVector,
+    tagVector,
+    collaborativeVector,
+    demographicsVector,
+  ] = await Promise.all([
     buildInteractionVector(interactionsResult.results, vectorIndex, openai),
     selectedTags.length
       ? generateEmbedding(selectedTags.join(' '), openai)
       : Promise.resolve(new Array(EMBEDDING_DIMENSIONS).fill(0)),
+    getCollaborativeVector(userId, env, openai, vectorIndex),
+    demographicsText
+      ? generateEmbedding(demographicsText, openai)
+      : Promise.resolve(new Array(EMBEDDING_DIMENSIONS).fill(0)),
   ]);
 
-  return combineVectors(
-    interactionVector,
-    tagVector,
-    interactionsResult.results.length > 0,
-    selectedTags.length > 0
-  );
+  return combineVectors([
+    { vector: interactionVector, weight: 0.5 }, // Content-based from own actions
+    { vector: tagVector, weight: 0.3 }, // Explicit interests
+    { vector: collaborativeVector, weight: 0.2 }, // Collaborative filtering
+    { vector: demographicsVector, weight: 0.1 }, // User profile data
+  ]);
 }
 
 async function updateSingleTagVector(
@@ -657,15 +805,210 @@ async function updateSingleTagVector(
   await env.TAG_VECTORS_KV.put('all_tags', JSON.stringify(existingTags));
 }
 
+// --- Exploration and Diversification Functions ---
+
+const getExplorationRate = async (
+  userId: string,
+  env: EnvBindings
+): Promise<number> => {
+  const interactionCount = await env.DB.prepare(
+    'SELECT COUNT(*) as count FROM interactions WHERE user_id = ?'
+  )
+    .bind(userId)
+    .first<{ count: number }>();
+
+  const recentEngagement = await env.DB.prepare(
+    `SELECT AVG(CASE WHEN action IN ('like', 'click') THEN 1 ELSE 0 END) as rate
+     FROM interactions 
+     WHERE user_id = ? AND timestamp > ?`
+  )
+    .bind(userId, Date.now() - 7 * 24 * 60 * 60 * 1000)
+    .first<{ rate: number }>();
+
+  const baseRate = Math.max(0.1, 0.4 - (interactionCount?.count || 0) * 0.01);
+
+  // Increase exploration if recent engagement is low
+  if ((recentEngagement?.rate || 0) < 0.3) {
+    return Math.min(0.6, baseRate * 2);
+  }
+
+  return baseRate;
+};
+
+const analyzeTemporalPatterns = async (
+  userId: string,
+  env: EnvBindings
+): Promise<TemporalPattern[]> => {
+  const patterns = await env.DB.prepare(
+    `SELECT 
+      CAST(strftime('%H', datetime(timestamp/1000, 'unixepoch')) AS INTEGER) as hour,
+      CAST(strftime('%w', datetime(timestamp/1000, 'unixepoch')) AS INTEGER) as day_of_week,
+      COUNT(*) as interaction_count,
+      AVG(CASE WHEN action = 'like' THEN 1 ELSE 0 END) as like_rate
+    FROM interactions 
+    WHERE user_id = ? AND timestamp > ?
+    GROUP BY hour, day_of_week
+    HAVING interaction_count >= 2`
+  )
+    .bind(userId, Date.now() - 30 * 24 * 60 * 60 * 1000)
+    .all<TemporalPattern>();
+
+  return patterns.results || [];
+};
+
+const getAntiCorrelatedRecommendations = async (
+  userVector: number[],
+  vectorIndex: Index,
+  topK = 2
+): Promise<ExplorationItem[]> => {
+  const invertedVector = userVector.map((v) => -v);
+
+  const antiResults = await withRetry(() =>
+    vectorIndex.query({
+      vector: invertedVector,
+      topK: topK * 2,
+      includeMetadata: true,
+    })
+  );
+
+  return antiResults.slice(0, topK).map((r) => ({
+    event_id: r.id.toString(),
+    score: r.score,
+    exploration_type: 'anti_correlated',
+    confidence: 0.6,
+  }));
+};
+
+const getTrendingItems = async (
+  env: EnvBindings,
+  topK = 2
+): Promise<ExplorationItem[]> => {
+  const trending = await env.DB.prepare(
+    `SELECT 
+      event_id,
+      COUNT(*) as interaction_count,
+      AVG(CASE WHEN action IN ('like', 'click') THEN 1 ELSE 0 END) as engagement_rate
+    FROM interactions 
+    WHERE timestamp > ? AND action IN ('like', 'click', 'view')
+    GROUP BY event_id
+    HAVING interaction_count >= 3
+    ORDER BY (interaction_count * engagement_rate) DESC
+    LIMIT ?`
+  )
+    .bind(Date.now() - 3 * 24 * 60 * 60 * 1000, topK) // Trending over last 3 days
+    .all<{
+      event_id: string;
+      interaction_count: number;
+      engagement_rate: number;
+    }>();
+
+  return (trending.results || []).map((r) => ({
+    event_id: r.event_id,
+    score: r.engagement_rate * Math.log(r.interaction_count + 1),
+    exploration_type: 'trending',
+    confidence: 0.8,
+  }));
+};
+
+const getSerendipityItems = async (
+  userId: string,
+  vectorIndex: Index,
+  env: EnvBindings,
+  topK = 1
+): Promise<ExplorationItem[]> => {
+  const userTags = await env.CACHE.get(`user_tags:${userId}`);
+  const avoidTags: string[] = userTags ? JSON.parse(userTags) : [];
+
+  const randomVector = new Array(EMBEDDING_DIMENSIONS)
+    .fill(0)
+    .map(() => Math.random() - 0.5);
+
+  const randomResults = await withRetry(() =>
+    vectorIndex.query({
+      vector: randomVector,
+      topK: topK * 5, // Fetch more to allow for filtering
+      includeMetadata: true,
+    })
+  );
+
+  const serendipitous = randomResults
+    .filter((r) => {
+      const metadata = r.metadata as VectorMetadata | undefined;
+      if (!metadata?.tags) return true;
+      // Ensure the item is not related to the user's core interests
+      return !metadata.tags.some((tag) => avoidTags.includes(tag));
+    })
+    .slice(0, topK);
+
+  return serendipitous.map((r) => ({
+    event_id: r.id.toString(),
+    score: Math.random() * 0.5,
+    exploration_type: 'serendipity',
+    confidence: 0.3,
+  }));
+};
+
+const injectExploration = (
+  mainRecs: EnrichedRecommendation[],
+  explorationItems: ExplorationItem[],
+  explorationRate: number
+): EnrichedRecommendation[] => {
+  if (explorationItems.length === 0) return mainRecs;
+
+  const result = [...mainRecs];
+  const slots = [2, 5, 8]; // Strategic positions to inject exploration items
+
+  let expIndex = 0;
+  for (const slot of slots) {
+    if (
+      slot < result.length &&
+      expIndex < explorationItems.length &&
+      Math.random() < explorationRate // Use rate to decide if injection happens
+    ) {
+      result.splice(slot, 0, {
+        // Use splice to insert instead of replace
+        event_id: explorationItems[expIndex].event_id,
+        score: explorationItems[expIndex].score,
+        diversified: true,
+      });
+      expIndex++;
+    }
+  }
+
+  return result;
+};
+
+const trackExplorationSuccess = async (
+  userId: string,
+  recommendations: EnrichedRecommendation[],
+  env: EnvBindings
+): Promise<void> => {
+  // Store exploration items for later success measurement
+  const explorationItems = recommendations
+    .filter((r) => r.diversified)
+    .map((r) => r.event_id);
+
+  if (explorationItems.length > 0) {
+    await env.CACHE.put(
+      `exploration_tracking:${userId}:${Date.now()}`,
+      JSON.stringify(explorationItems),
+      { expirationTtl: 7 * 24 * 60 * 60 } // 7 days
+    );
+  }
+};
+
+// --- Default Export and Scheduled Tasks ---
+
 export default {
   fetch: app.fetch,
   scheduled: async (
     controller: ScheduledController,
     env: EnvBindings,
     ctx: ExecutionContext
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: <explanation>
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Scheduled task has multiple logic paths
   ): Promise<void> => {
     if (controller.cron === '*/30 * * * *') {
+      // Update tag vectors every 30 minutes
       try {
         const vectorIndex = new Index({
           url: env.VECTOR_URL,
