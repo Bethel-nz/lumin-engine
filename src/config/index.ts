@@ -1,17 +1,17 @@
 export const CONFIG = {
-  WEIGHTS: {
+  ACTION_WEIGHTS: {
     click: 1,
     like: 2,
     view: 0.5,
-    select_tags: 5,
     dislike: -1,
     signup: 0,
-  } as const,
+    select_tags: 5,
+  },
 
   EMBEDDING: {
-    MODEL: 'text-embedding-3-large',
-    DIMENSIONS: 3072,
-  } as const,
+    MODEL: 'text-embedding-3-small',
+    DIMENSIONS: 1536,
+  },
 
   CACHE_TTL: {
     RECOMMENDATIONS: 1800, // 30 minutes
