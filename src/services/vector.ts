@@ -1,7 +1,7 @@
 import type { Index, Vector } from '@upstash/vector';
 import type OpenAI from 'openai';
 import { CONFIG } from '../config';
-import type { EnvBindings, InteractionResult, VectorMetadata } from '../types';
+import type { InteractionResult } from '../types';
 import { captureWorkerError, withRetry } from '../utils';
 
 export const generateEmbedding = async (
@@ -42,27 +42,56 @@ export const fetchEventVectors = async (
 
 export const buildInteractionVector = async (
   interactions: Omit<InteractionResult, 'total_weight' | 'latest'>[],
-  vectorIndex: Index,
-  openai: OpenAI
+  vectorIndex: Index
 ): Promise<number[]> => {
-  if (!interactions.length)
+  if (!interactions.length) {
     return new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
+  }
 
   const eventIds = [...new Set(interactions.map((r) => r.event_id))];
   const eventVectors = await fetchEventVectors(vectorIndex, eventIds);
 
-  const interactionTextParts: string[] = [];
-  for (const r of interactions) {
-    const vectorData = eventVectors[r.event_id];
-    const metadata = vectorData?.metadata as VectorMetadata | undefined;
-    if (metadata?.tags) {
-      interactionTextParts.push(`${metadata.tags.join(' ')} ${r.action}`);
+  const weightedVector = new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
+  let totalWeight = 0;
+
+  for (const interaction of interactions) {
+    const vectorData = eventVectors[interaction.event_id];
+    if (vectorData?.vector) {
+      const vector = vectorData.vector as number[];
+
+      // Time-decaying weight
+      const interactionTime = new Date(interaction.timestamp).getTime();
+      const now = Date.now();
+      const ageInDays = (now - interactionTime) / (1000 * 60 * 60 * 24);
+      const decayFactor = Math.exp(-0.1 * ageInDays); // Exponential decay
+
+      // Action weight
+      const actionWeight =
+        CONFIG.ACTION_WEIGHTS[
+          interaction.action as keyof typeof CONFIG.ACTION_WEIGHTS
+        ] ?? 0;
+      const finalWeight = actionWeight * decayFactor;
+
+      for (let i = 0; i < vector.length; i++) {
+        weightedVector[i] += vector[i] * finalWeight;
+      }
+      totalWeight += finalWeight;
     }
   }
 
-  return interactionTextParts.length > 0
-    ? await generateEmbedding(interactionTextParts.join(' . '), openai)
-    : new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
+  if (totalWeight === 0) {
+    return new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
+  }
+
+  // Normalize the aggregated vector
+  const norm = Math.sqrt(
+    weightedVector.reduce((sum, val) => sum + val * val, 0)
+  );
+  if (norm === 0) {
+    return new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
+  }
+
+  return weightedVector.map((v) => v / norm);
 };
 
 export const combineVectors = (
@@ -80,61 +109,12 @@ export const combineVectors = (
       }
     }
   }
-  return finalVector;
-};
 
-export const updateSingleTagVector = async (
-  tag: string,
-  env: EnvBindings,
-  vectorIndex: Index
-): Promise<void> => {
-  const interactionsQuery = await env.DB.prepare(
-    `SELECT i.event_id
-      FROM interactions i
-      JOIN events e ON i.event_id = e.id
-      WHERE e.tag = ? AND i.action IN ('like', 'click')
-      ORDER BY i.timestamp DESC
-      LIMIT 50`
-  )
-    .bind(tag)
-    .all<{ event_id: string }>();
-
-  if (!interactionsQuery.results || interactionsQuery.results.length === 0) {
-    return;
+  // Normalize the final combined vector
+  const norm = Math.sqrt(finalVector.reduce((sum, val) => sum + val * val, 0));
+  if (norm === 0) {
+    return new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
   }
 
-  const eventIds = [
-    ...new Set(interactionsQuery.results.map((i) => i.event_id)),
-  ];
-  const eventVectorsData = await fetchEventVectors(vectorIndex, eventIds);
-  const validEventVectors = Object.values(eventVectorsData)
-    .filter((v): v is Vector & { vector: number[] } => !!v?.vector)
-    .map((v) => v.vector);
-
-  if (validEventVectors.length === 0) {
-    return;
-  }
-
-  const averageEventVector = validEventVectors
-    .reduce((acc, vec) => {
-      return acc.map((val, i) => val + (vec[i] ?? 0));
-    }, new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0))
-    .map((v) => v / validEventVectors.length);
-
-  const existingTagsStr = await env.TAG_VECTORS_KV.get('all_tags');
-  const existingTags: Record<string, number[]> = existingTagsStr
-    ? JSON.parse(existingTagsStr)
-    : {};
-
-  const currentTagVector =
-    existingTags[tag] || new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
-
-  const learningRate = 0.1;
-  const updatedVector = currentTagVector.map(
-    (val, i) => val * (1 - learningRate) + averageEventVector[i] * learningRate
-  );
-
-  existingTags[tag] = updatedVector;
-
-  await env.TAG_VECTORS_KV.put('all_tags', JSON.stringify(existingTags));
+  return finalVector.map((v) => v / norm);
 };
