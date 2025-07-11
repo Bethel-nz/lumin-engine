@@ -24,8 +24,8 @@ export interface Interaction {
 export interface InteractionResult {
   event_id: string;
   action: string;
-  total_weight: number;
-  latest: number;
+  weight: number;
+  timestamp: string;
 }
 
 export interface VectorMetadata {
