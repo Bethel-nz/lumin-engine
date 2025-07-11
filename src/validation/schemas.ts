@@ -14,7 +14,7 @@ export const logInteractionSchema = z
     event_id: z.string().min(1),
     action: z
       .string()
-      .refine((val) => Object.keys(CONFIG.WEIGHTS).includes(val), {
+      .refine((val) => Object.keys(CONFIG.ACTION_WEIGHTS).includes(val), {
         message: 'Invalid action type',
       }),
     tags: z.array(z.string()).optional(),
