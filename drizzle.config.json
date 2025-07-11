@@ -1,0 +1,6 @@
+{
+  "$schema": "https://www.drizzlekit.com/schema/v1.0.0",
+  "out": "./src/db/migrations",
+  "schema": "./src/db/schema/index.ts",
+  "dialect": "sqlite"
+}
