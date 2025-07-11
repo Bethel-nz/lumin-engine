@@ -32,6 +32,12 @@ export const getRecommendationsRoute = async (
 
   try {
     const cacheKey = `recs:${userId}`;
+    const cachedRecs = await c.env.CACHE.get(cacheKey);
+    if (cachedRecs) {
+      const recs = JSON.parse(cachedRecs);
+      return c.json(recs);
+    }
+
     const hashKey = `recs_hash:${userId}`;
     const vectorIndex = getVectorIndex(c);
     const openai = getOpenAIClient(c);
