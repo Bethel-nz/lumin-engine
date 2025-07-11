@@ -17,7 +17,7 @@ export const insertInteraction = async (
   data: Omit<Interaction, 'weight'>
 ): Promise<void> => {
   const weight =
-    CONFIG.WEIGHTS[data.action as keyof typeof CONFIG.WEIGHTS] ?? 0;
+    CONFIG.ACTION_WEIGHTS[data.action as keyof typeof CONFIG.ACTION_WEIGHTS] ?? 0;
   await db
     .prepare(
       'INSERT INTO interactions (user_id, event_id, action, weight, timestamp) VALUES (?, ?, ?, ?, ?)'
