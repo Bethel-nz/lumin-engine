@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lumin",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-07-01",
+  "workers_dev": true,
+  "account_id": "0095f5e80c93e8252a4019ae095d6848",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "VECTOR_URL": "",
+    "VECTOR_TOKEN": "",
+    "X_APP_KEY": "",
+    "OPENAI_API_KEY": ""
+  },
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "your_kv_namespace_id"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lumin-db",
+      "database_id": "your_database_id",
+      "migrations_dir": "db/migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
