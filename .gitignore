@@ -33,3 +33,5 @@ lerna-debug.log*
 .DS_Store
 
 wrangler.jsonc
+
+worker-configuration.d.ts
