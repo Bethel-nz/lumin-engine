@@ -1,6 +1,4 @@
-import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
-import * as schema from '../db/schema';
 import { getOpenAIClient, getVectorIndex } from '../lib/clients';
 import { getTinybirdClient, createEventIngestionEndpoint } from '../lib/tinybird';
 import { generateEmbedding } from '../services/vector';
@@ -8,7 +6,7 @@ import type { EnvBindings } from '../types';
 import { handleError, validateInput, withRetry } from '../utils';
 import { ingestEventSchema } from '../validation/tinybird-schemas';
 
-export const ingestEventRoute = async (
+export const ingestEventTinybirdRoute = async (
   c: Context<{ Bindings: EnvBindings }>
 ) => {
   try {
@@ -19,7 +17,6 @@ export const ingestEventRoute = async (
     const openai = getOpenAIClient(c);
     const tb = getTinybirdClient(c);
     const ingestEvent = createEventIngestionEndpoint(tb);
-    const db = drizzle(c.env.DB, { schema });
 
     const embeddingText = `${eventData.title} ${eventData.description || ''} ${eventData.tags.join(' ')} ${eventData.host ? `hosted by ${eventData.host}` : ''}`;
     
@@ -37,29 +34,18 @@ export const ingestEventRoute = async (
     }
 
     await withRetry(async () => {
-      await Promise.all([
-        db.insert(schema.events).values({ 
+      await vectorIndex.upsert([
+        { 
           id: eventData.id, 
+          vector, 
           metadata: { 
             title: eventData.title, 
-            host: eventData.host,
-            category: eventData.category,
-            location: eventData.location
+            tags: eventData.tags, 
+            host: eventData.host ?? '',
+            category: eventData.category ?? '',
+            location: eventData.location ?? ''
           } 
-        }),
-        vectorIndex.upsert([
-          { 
-            id: eventData.id, 
-            vector, 
-            metadata: { 
-              title: eventData.title, 
-              tags: eventData.tags, 
-              host: eventData.host ?? '',
-              category: eventData.category ?? '',
-              location: eventData.location ?? ''
-            } 
-          },
-        ])
+        },
       ]);
     });
 

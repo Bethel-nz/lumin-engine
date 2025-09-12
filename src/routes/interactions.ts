@@ -1,8 +1,11 @@
 import type { Context } from 'hono';
 import { checkUserExists, insertInteraction } from '../services/database';
+import { getTinybirdClient, createInteractionIngestionEndpoint } from '../lib/tinybird';
 import type { EnvBindings } from '../types';
-import { handleError, validateInput } from '../utils';
-import { logInteractionSchema } from '../validation/schemas';
+import { handleError, validateInput, withRetry } from '../utils';
+import { logInteractionSchema } from '../validation/tinybird-schemas';
+
+
 
 export const logInteractionRoute = async (
   c: Context<{ Bindings: EnvBindings }>
@@ -11,6 +14,9 @@ export const logInteractionRoute = async (
     const body = await c.req.json();
     const interactionData = validateInput(body, logInteractionSchema);
     const { user_id, event_id, action, tags } = interactionData;
+
+    const tb = getTinybirdClient(c);
+    const ingestInteraction = createInteractionIngestionEndpoint(tb);
 
     const userExists = await checkUserExists(c.env.DB, user_id);
     if (!userExists) {
@@ -22,12 +28,12 @@ export const logInteractionRoute = async (
       });
     }
 
-    await insertInteraction(c.env.DB, {
-      user_id,
-      event_id,
-      action,
+    const enrichedInteraction = {
+      ...interactionData,
       timestamp: Date.now(),
-    });
+    };
+
+    await withRetry(() => ingestInteraction(enrichedInteraction));
 
     if (action === 'select_tags' && tags) {
       await c.env.CACHE.put(`user_tags:${user_id}`, JSON.stringify(tags), {
@@ -35,7 +41,6 @@ export const logInteractionRoute = async (
       });
     }
 
-    // Clear recommendation cache for this user
     await c.env.CACHE.delete(`recs:${user_id}`);
     await c.env.CACHE.delete(`recs_hash:${user_id}`);
 
