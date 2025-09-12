@@ -1,13 +1,13 @@
 import type { Index } from '@upstash/vector';
+import type { Context } from 'hono';
 import { CONFIG } from '../config';
 import type {
   EnrichedRecommendation,
   EnvBindings,
   ExplorationItem,
-  VectorMetadata,
 } from '../types';
-import { withRetry } from '../utils';
 import { getRecentEngagementRate, getUserInteractionCount } from './database';
+import { getTrendingItems, getSerendipityItems, getAntiCorrelatedRecommendations } from './analytics';
 
 export const getExplorationRate = async (
   userId: string,

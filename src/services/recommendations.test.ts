@@ -1,18 +1,14 @@
-// In: src/services/recommendations.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { computeHybridUserVector, getCollaborativeVector } from './recommendations';
 import * as db from './database';
 import * as vector from './vector';
 import { CONFIG } from '../config';
 
-// Mock all dependencies
 vi.mock('./database');
 vi.mock('./vector', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./vector')>();
   return {
     ...actual,
-    // We want to use the real combineVectors, so we don't mock it.
-    // We only mock the functions that have external dependencies.
     combineVectors: actual.combineVectors,
     buildInteractionVector: vi.fn(),
     generateEmbedding: vi.fn(),
@@ -23,9 +19,6 @@ vi.mock('./recommendations', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./recommendations')>();
   return {
     ...actual,
-    // We are testing computeHybridUserVector, so we don't mock it,
-    // but we might need to mock other functions from the same file if it called them.
-    // In this case, it calls getCollaborativeVector, which we will let run but mock its deps.
     getCollaborativeVector: actual.getCollaborativeVector,
   };
 });
