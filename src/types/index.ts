@@ -6,6 +6,8 @@ export interface EnvBindings {
   VECTOR_TOKEN: string;
   X_APP_KEY: string;
   OPENAI_API_KEY: string;
+  TINYBIRD_TOKEN: string;
+  TINYBIRD_BASE_URL: string;
 }
 
 export interface UserDemographics {
