@@ -9,6 +9,7 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@chronark/zod-bird": "chronark/zod-bird",
     "@upstash/vector": "^1.2.0",
     "bcrypt-edge": "^0.1.0",
     "dotenv": "^17.1.0",
