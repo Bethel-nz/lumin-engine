@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { computeHybridUserVector, getCollaborativeVector } from './recommendations';
 import * as db from './database';
 import * as vector from './vector';
@@ -39,8 +39,11 @@ describe('computeHybridUserVector', () => {
   } as any;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    // No longer need to mock combineVectors here
+    vi.resetAllMocks();
+
+    // Reset individual mock functions that were cleared by resetAllMocks
+    mockCache.get.mockResolvedValue(null);
+
     // Add default mocks for all tests to avoid undefined errors
     vi.mocked(db.getSimilarUsers).mockResolvedValue([]);
   });
@@ -127,7 +130,9 @@ describe('computeHybridUserVector', () => {
     vi.mocked(db.getUserInteractions).mockRejectedValue(error); // Simulate DB error
     vi.mocked(db.getUserDemographics).mockResolvedValue(null);
     mockCache.get.mockResolvedValue(null);
-    // No need to mock getCollaborativeVector as the main function will now catch the error
+
+    // Mock console.error to suppress confusing stderr output during test
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // 2. Act
     const finalVector = await computeHybridUserVector(userId, mockEnv, mockOpenAI, mockVectorIndex);
@@ -137,5 +142,9 @@ describe('computeHybridUserVector', () => {
     expect(finalVector).toEqual(zeroVector);
     // Ensure it didn't proceed to generate embeddings if initial data fetch failed
     expect(vector.generateEmbedding).not.toHaveBeenCalled();
+    // Verify error was logged (even though we suppressed the output)
+    expect(consoleSpy).toHaveBeenCalledWith('Error computing hybrid user vector:', error);
+
+    consoleSpy.mockRestore();
   });
 }); 

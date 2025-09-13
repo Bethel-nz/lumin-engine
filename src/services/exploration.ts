@@ -8,24 +8,30 @@ import type {
 } from '../types';
 import { getRecentEngagementRate, getUserInteractionCount } from './database';
 import { getTrendingItems, getSerendipityItems, getAntiCorrelatedRecommendations } from './analytics';
+import { withRetry } from '../utils';
 
 export const getExplorationRate = async (
   userId: string,
   env: EnvBindings
 ): Promise<number> => {
-  const interactionCount = await getUserInteractionCount(env.DB, userId);
-  const recentEngagement = await getRecentEngagementRate(env.DB, userId);
+  try {
+    const interactionCount = await getUserInteractionCount(env.DB, userId);
+    const recentEngagement = await getRecentEngagementRate(env.DB, userId);
 
-  const baseRate = Math.max(
-    CONFIG.EXPLORATION.BASE_RATE,
-    0.4 - interactionCount * 0.01
-  );
+    const baseRate = Math.max(
+      CONFIG.EXPLORATION.MIN_RATE + 0.05, // Ensure always above minimum
+      CONFIG.EXPLORATION.BASE_RATE - interactionCount * CONFIG.EXPLORATION.RATE_DECAY_PER_INTERACTION
+    );
 
-  if (recentEngagement < 0.3) {
-    return Math.min(CONFIG.EXPLORATION.MAX_RATE, baseRate * 2);
+    if (recentEngagement < CONFIG.EXPLORATION.LOW_ENGAGEMENT_THRESHOLD) {
+      return Math.min(CONFIG.EXPLORATION.MAX_RATE, Math.max(0.45, baseRate * CONFIG.EXPLORATION.LOW_ENGAGEMENT_MULTIPLIER));
+    }
+
+    return baseRate;
+  } catch (error) {
+    // Fallback to a safe default rate on error
+    return CONFIG.EXPLORATION.BASE_RATE;
   }
-
-  return baseRate;
 };
 
 export const getAntiCorrelatedRecommendations = async (
