@@ -16,6 +16,7 @@ vi.mock('../utils', async (importOriginal) => {
     ...actual,
     validateInput: vi.fn((data) => data),
     withRetry: vi.fn((fn) => fn()),
+    handleError: vi.fn(), // Mock error handler as a spy
   };
 });
 

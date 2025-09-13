@@ -6,7 +6,7 @@ import { handleError, withRetry } from '../utils';
 
 export const searchRoute = async (c: Context<{ Bindings: EnvBindings }>) => {
   const { query } = c.req.query();
-  if (!query) {
+  if (!query || query.trim() === '') {
     return handleError(c, null, 'Query parameter is required', 400);
   }
 
@@ -16,15 +16,13 @@ export const searchRoute = async (c: Context<{ Bindings: EnvBindings }>) => {
 
     const queryVector = await generateEmbedding(query, openai);
     if (queryVector.every((v) => v === 0)) {
-      throw new Error(
-        'Failed to generate a valid embedding for the search query.'
-      );
+      return handleError(c, null, 'Failed to perform search', 400);
     }
 
     const searchResults = await withRetry(() =>
       vectorIndex.query({
         vector: queryVector,
-        topK: 10,
+        topK: 20,
         includeMetadata: true,
       })
     );
@@ -33,7 +31,7 @@ export const searchRoute = async (c: Context<{ Bindings: EnvBindings }>) => {
       const metadata = r.metadata as VectorMetadata | undefined;
       return {
         event_id: r.id,
-        title: metadata?.title ?? 'N/A',
+        title: metadata?.title ?? '',
         tags: metadata?.tags ?? [],
         score: r.score,
       };

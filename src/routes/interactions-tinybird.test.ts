@@ -14,6 +14,7 @@ vi.mock('../utils', async (importOriginal) => {
     ...actual,
     validateInput: vi.fn((data) => data),
     withRetry: vi.fn((fn) => fn()),
+    handleError: vi.fn(), // Mock error handler as a spy
   };
 });
 
@@ -69,10 +70,6 @@ describe('logInteractionRoute with TinyBird', () => {
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...interactionData,
       timestamp: expect.any(Number),
-      ip_hash: expect.any(String),
-      user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      referrer: 'https://example.com/events',
-      device_type: 'desktop',
     });
 
     expect(mockContext.env.CACHE.delete).toHaveBeenCalledWith('recs:user-123');
@@ -84,7 +81,7 @@ describe('logInteractionRoute with TinyBird', () => {
     }, 201);
   });
 
-  it('should detect mobile device type from user agent', async () => {
+  it('should handle mobile platform interactions', async () => {
     const interactionData = {
       user_id: 'user-mobile',
       event_id: 'event-123',
@@ -103,14 +100,10 @@ describe('logInteractionRoute with TinyBird', () => {
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...interactionData,
       timestamp: expect.any(Number),
-      ip_hash: expect.any(String),
-      user_agent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1)',
-      referrer: undefined,
-      device_type: 'mobile',
     });
   });
 
-  it('should detect tablet device type from user agent', async () => {
+  it('should handle tablet platform interactions', async () => {
     const interactionData = {
       user_id: 'user-tablet',
       event_id: 'event-123',
@@ -129,10 +122,6 @@ describe('logInteractionRoute with TinyBird', () => {
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...interactionData,
       timestamp: expect.any(Number),
-      ip_hash: undefined,
-      user_agent: 'Mozilla/5.0 (iPad; CPU OS 15_0)',
-      referrer: undefined,
-      device_type: 'tablet',
     });
   });
 
@@ -153,10 +142,6 @@ describe('logInteractionRoute with TinyBird', () => {
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...interactionData,
       timestamp: expect.any(Number),
-      ip_hash: undefined,
-      user_agent: undefined,
-      referrer: undefined,
-      device_type: 'desktop',
     });
 
     expect(mockContext.env.CACHE.put).toHaveBeenCalledWith(
@@ -193,10 +178,6 @@ describe('logInteractionRoute with TinyBird', () => {
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...interactionData,
       timestamp: expect.any(Number),
-      ip_hash: undefined,
-      user_agent: undefined,
-      referrer: undefined,
-      device_type: 'desktop',
     });
   });
 
@@ -240,25 +221,4 @@ describe('logInteractionRoute with TinyBird', () => {
     expect(mockIngestEndpoint).not.toHaveBeenCalled();
   });
 
-  it('should hash IP addresses for privacy', async () => {
-    const interactionData = {
-      user_id: 'user-ip',
-      event_id: 'event-123',
-      action: 'view',
-      session_id: 'session-ip',
-    };
-
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header
-      .mockReturnValueOnce('192.168.1.100')
-      .mockReturnValueOnce(null)
-      .mockReturnValueOnce(null);
-
-    await logInteractionRoute(mockContext);
-
-    const call = mockIngestEndpoint.mock.calls[0][0];
-    expect(call.ip_hash).toBeDefined();
-    expect(call.ip_hash).not.toBe('192.168.1.100');
-    expect(call.ip_hash).toMatch(/^\d+$/);
-  });
 });

@@ -1,275 +1,434 @@
-// In: src/routes/recommendations.test.ts
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Context } from 'hono';
 import { getRecommendationsRoute } from './recommendations';
-import { getVectorIndex } from '../lib/clients';
-import type { EnrichedRecommendation } from '../types';
+import * as clients from '../lib/clients';
+import * as recommendationsService from '../services/recommendations';
+import * as explorationService from '../services/exploration';
+import * as analytics from '../services/analytics';
+import * as utils from '../utils';
+import type { EnvBindings, ExplorationItem } from '../types';
 
-// --- MOCK THE DIRECT DEPENDENCIES of getRecommendationsRoute ---
-
-// Mock the entire recommendations service to control computeHybridUserVector
-vi.mock('../services/recommendations', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../services/recommendations')>();
-  return {
-    ...actual,
-    computeHybridUserVector: vi.fn(),
-  };
-});
-
-// Mock the exploration service to control getTrendingItems
-vi.mock('../services/exploration', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../services/exploration')>();
-  return {
-    ...actual,
-    getTrendingItems: vi.fn(),
-    getExplorationRate: vi.fn().mockResolvedValue(0), // Default to no exploration
-    injectExploration: vi.fn((recs) => recs), // Default to pass-through
-    trackExplorationSuccess: vi.fn(),
-  };
-});
-
-// Mock the clients lib (if not already handled by context)
-vi.mock('../lib/clients', () => ({
-  getVectorIndex: vi.fn().mockReturnValue({ query: vi.fn() }), // Return a dummy index
-  getOpenAIClient: vi.fn(),
-}));
-
-// Mock the utils (specifically for getABTestGroup)
+// Mock external dependencies that integrate with multiple systems
+vi.mock('../lib/clients');
+vi.mock('../services/recommendations');
+vi.mock('../services/exploration');
+vi.mock('../services/analytics');
 vi.mock('../utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils')>();
   return {
     ...actual,
-    getABTestGroup: vi.fn().mockResolvedValue('B'), // Return a default group
-    generateHash: vi.fn().mockReturnValue('new_hash'),
+    getABTestGroup: vi.fn().mockResolvedValue('B'),
+    generateHash: vi.fn().mockReturnValue('test_hash'),
+    withRetry: vi.fn((fn) => fn()),
+    captureWorkerError: vi.fn(),
+    handleError: vi.fn(), // Mock error handler as a spy
   };
 });
 
-// --- Import the mocked services AFTER setting up the mocks ---
-import * as recommendationsService from '../services/recommendations';
-import * as explorationService from '../services/exploration';
-import * as utils from '../utils';
-
-// --- Test Setup ---
-
-const mockCache = {
-  get: vi.fn().mockResolvedValue(null),
-  put: vi.fn(),
-};
-
-const mockEnv = {
-  DB: {},
-  CACHE: mockCache,
-} as any;
-
-const mockContext = (userId: string) =>
-  ({
+/**
+ * Recommendation Engine Tests with Dynamic Limits and TinyBird Analytics
+ * 
+ * These tests verify the new architecture where:
+ * 1. No artificial limits - returns all relevant recommendations
+ * 2. TinyBird powers trending and exploration features
+ * 3. Dynamic diversification based on available candidates
+ * 4. Structured response format for main server filtering
+ * 
+ * The key insight is that we're testing a recommendation orchestration system
+ * that coordinates multiple data sources and applies intelligent filtering,
+ * not just a simple similarity search.
+ */
+describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () => {
+  const mockContext = {
     req: {
-      param: vi.fn().mockReturnValue(userId), // FIX: Return the string directly
+      param: vi.fn(),
     },
-    env: mockEnv,
-    json: vi.fn((data) => new Response(JSON.stringify(data), { status: 200 })),
-  }) as any;
+    json: vi.fn(),
+    env: {
+      CACHE: {
+        get: vi.fn(),
+        put: vi.fn(),
+      },
+    } as EnvBindings,
+  } as unknown as Context<{ Bindings: EnvBindings }>;
 
-// --- Helper Functions for Mocks ---
-const mockVectorQuery = (results: any[]) => {
-  (getVectorIndex as any).mockReturnValue({ query: vi.fn().mockResolvedValue(results) });
-};
+  const mockVectorIndex = {
+    query: vi.fn(),
+  };
+  const mockOpenAI = {} as any;
 
-// --- The Test Suite ---
-
-describe('getRecommendationsRoute', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockCache.get.mockResolvedValue(null);
-    mockCache.put.mockClear();
+    vi.resetAllMocks();
+
+    // Reset individual mock functions that were cleared by resetAllMocks
+    mockVectorIndex.query.mockResolvedValue([]);
+    mockContext.env.CACHE.get.mockResolvedValue(null);
+    mockContext.env.CACHE.put.mockResolvedValue();
+    mockContext.req.param.mockReturnValue('test-user');
+    mockContext.json.mockReturnValue({});
+
+    // Reset utility mocks
     vi.mocked(utils.getABTestGroup).mockResolvedValue('B');
+    vi.mocked(utils.generateHash).mockReturnValue('test_hash');
+    vi.mocked(utils.withRetry).mockImplementation((fn) => fn());
+
+    // Reset service mocks
+    vi.mocked(recommendationsService.computeHybridUserVector).mockResolvedValue([]);
+    vi.mocked(explorationService.getExplorationRate).mockResolvedValue(0.3);
+    vi.mocked(explorationService.injectExploration).mockImplementation((recs) => recs);
+    vi.mocked(explorationService.trackExplorationSuccess).mockResolvedValue();
+
+    // Reset analytics mocks
+    vi.mocked(analytics.getAntiCorrelatedRecommendations).mockResolvedValue([]);
+    vi.mocked(analytics.getSerendipityItems).mockResolvedValue([]);
+    vi.mocked(analytics.getTrendingItems).mockResolvedValue([]);
+
+    // Setup successful default responses
+    vi.mocked(clients.getVectorIndex).mockReturnValue(mockVectorIndex);
+    vi.mocked(clients.getOpenAIClient).mockReturnValue(mockOpenAI);
   });
 
-  it('should return trending items for a cold start user', async () => {
-    const userId = 'new_user_123';
-    const context = mockContext(userId);
+  /**
+   * Dynamic Recommendation Limits: No artificial constraints
+   * 
+   * This test verifies that the system returns all relevant recommendations
+   * without arbitrary limits, allowing the main server to decide pagination/filtering.
+   * The new architecture fetches 200 candidates and returns all that match user preferences.
+   */
+  it('should return all relevant recommendations without artificial limits', async () => {
+    const userId = 'user-unlimited';
+    mockContext.req.param.mockReturnValue(userId);
 
-    const mockedComputeVector = recommendationsService.computeHybridUserVector as any;
-    mockedComputeVector.mockResolvedValue(new Array(1536).fill(0));
-
-    const mockedGetTrending = explorationService.getTrendingItems as any;
-    const popularItems = [
-      { event_id: 'evt_popular_1', score: 0.9 },
-      { event_id: 'evt_popular_2', score: 0.8 },
-    ];
-    mockedGetTrending.mockResolvedValue(popularItems);
-
-    const response = await getRecommendationsRoute(context);
-    const data = (await response.json()) as { event_id: string }[];
-
-    expect(response.status).toBe(200);
-    expect(data).toHaveLength(2);
-    expect(data[0].event_id).toBe('evt_popular_1');
-    expect(recommendationsService.computeHybridUserVector).toHaveBeenCalled();
-    expect(explorationService.getTrendingItems).toHaveBeenCalled();
-    expect(mockCache.put).not.toHaveBeenCalled();
-  });
-
-  it('should return personalized recommendations for a user with history', async () => {
-    const userId = 'user_with_history';
-    const context = mockContext(userId);
-
-    const mockedComputeVector = recommendationsService.computeHybridUserVector as any;
-    const userVector = new Array(1536).fill(0).map((_, i) => i * 0.001);
-    mockedComputeVector.mockResolvedValue(userVector);
-
-    const vectorResults = [
-      { id: 'evt_rec_1', score: 0.95, metadata: { name: 'Event 1' } },
-      { id: 'evt_rec_2', score: 0.92, metadata: { name: 'Event 2' } },
-    ];
-    mockVectorQuery(vectorResults);
-
-    const response = await getRecommendationsRoute(context);
-    const data = (await response.json()) as { event_id: string }[];
-
-    expect(response.status).toBe(200);
-    expect(data).toHaveLength(2);
-    expect(data[0].event_id).toBe('evt_rec_1');
-    expect(getVectorIndex(context.env).query).toHaveBeenCalledWith(
-      expect.objectContaining({ vector: userVector, topK: 50 })
-    );
-    expect(mockCache.put).toHaveBeenCalledTimes(2);
-  });
-
-  it('should return cached recommendations if available', async () => {
-    const userId = 'cached_user';
-    const context = mockContext(userId);
-    const cachedRecs = [{ event_id: 'evt_cached_1', score: 0.99 }];
-
-    mockCache.get.mockResolvedValueOnce(JSON.stringify(cachedRecs));
-
-    const response = await getRecommendationsRoute(context);
-    const data = (await response.json()) as { event_id: string }[];
-
-    expect(response.status).toBe(200);
-    expect(data).toEqual(cachedRecs);
-    expect(mockCache.get).toHaveBeenCalledTimes(1);
-    expect(recommendationsService.computeHybridUserVector).not.toHaveBeenCalled();
-    expect(getVectorIndex(context.env).query).not.toHaveBeenCalled();
-    expect(mockCache.put).not.toHaveBeenCalled();
-  });
-
-  it('should apply diversification for users in AB test group A', async () => {
-    const userId = 'user_in_group_a';
-    const context = mockContext(userId);
-
-    vi.mocked(utils.getABTestGroup).mockResolvedValue('A');
-
-    const mockedComputeVector = recommendationsService.computeHybridUserVector as any;
-    mockedComputeVector.mockResolvedValue(new Array(1536).fill(0.1));
-
-    const vectorResults = Array.from({ length: 20 }, (_, i) => ({
-      id: `evt_a_${i}`,
-      score: 0.9 - i * 0.01,
-      metadata: {},
+    // Mock a large set of relevant recommendations (simulating rich data)
+    const largeCandidateSet = Array.from({ length: 150 }, (_, i) => ({
+      id: `event-${i}`,
+      score: 0.9 - (i * 0.005), // Gradually decreasing scores
+      metadata: {
+        tags: ['tech', 'ai'],
+        title: `Event ${i}`,
+        host: 'TechCorp',
+        category: 'technology',
+        location: 'SF'
+      }
     }));
-    mockVectorQuery(vectorResults);
 
-    const response = await getRecommendationsRoute(context);
-    const data = (await response.json()) as { event_id: string; diversified: boolean }[];
+    const mockUserVector = Array.from({ length: 1536 }, () => Math.random());
+    
+    vi.mocked(recommendationsService.computeHybridUserVector).mockResolvedValue(mockUserVector);
+    mockVectorIndex.query.mockResolvedValue(largeCandidateSet);
+    vi.mocked(explorationService.getExplorationRate).mockResolvedValue(0.3);
+    vi.mocked(explorationService.trackExplorationSuccess).mockResolvedValue();
 
-    expect(response.status).toBe(200);
-    expect(data).toHaveLength(10);
-    expect(data.filter((d) => d.diversified)).toHaveLength(2);
-    expect(data[9].event_id).toBe('evt_a_19');
-    expect(getVectorIndex(context.env).query).toHaveBeenCalledWith(
-      expect.objectContaining({ topK: 40 })
+    // Mock user has selected tags for filtering
+    mockContext.env.CACHE.get
+      .mockResolvedValueOnce(null) // No cached recommendations
+      .mockResolvedValueOnce(JSON.stringify(['tech', 'ai'])); // User tags
+
+    await getRecommendationsRoute(mockContext);
+
+    // Verify vector query requests large initial set
+    expect(mockVectorIndex.query).toHaveBeenCalledWith({
+      vector: mockUserVector,
+      topK: 200, // Increased from previous 40-50 limit
+      includeMetadata: true,
+    });
+
+    // Verify response structure includes all filtered candidates
+    expect(mockContext.json).toHaveBeenCalledWith({
+      recommendations: expect.arrayContaining([
+        expect.objectContaining({
+          event_id: expect.any(String),
+          score: expect.any(Number),
+          diversified: expect.any(Boolean),
+        })
+      ]),
+      metadata: expect.objectContaining({
+        user_id: userId,
+        ab_group: 'B',
+        exploration_rate: 0.3,
+        total_candidates: expect.any(Number),
+        cache_hit: false,
+      })
+    });
+
+    // Should return significantly more than old 15-item limit
+    const call = mockContext.json.mock.calls[0][0];
+    expect(call.recommendations.length).toBeGreaterThan(50);
+  });
+
+  /**
+   * TinyBird Trending Fallback: Cold start handling
+   * 
+   * For new users or users with zero vectors, the system should leverage
+   * TinyBird's real-time trending data to provide relevant recommendations.
+   * This tests the integration with the new analytics service.
+   */
+  it('should use TinyBird trending data for cold start users', async () => {
+    const userId = 'cold-start-user';
+    mockContext.req.param.mockReturnValue(userId);
+
+    const zeroVector = new Array(1536).fill(0); // Indicates no user history
+    const trendingItems: ExplorationItem[] = Array.from({ length: 75 }, (_, i) => ({
+      event_id: `trending-${i}`,
+      score: 0.95 - (i * 0.01),
+      exploration_type: 'trending',
+      confidence: 0.8,
+    }));
+
+    vi.mocked(recommendationsService.computeHybridUserVector).mockResolvedValue(zeroVector);
+    vi.mocked(analytics.getTrendingItems).mockResolvedValue(trendingItems);
+
+    await getRecommendationsRoute(mockContext);
+
+    // Verify TinyBird trending is called with increased limit
+    expect(analytics.getTrendingItems).toHaveBeenCalledWith(mockContext, 100);
+
+    // Verify fallback response structure
+    expect(mockContext.json).toHaveBeenCalledWith({
+      recommendations: expect.arrayContaining([
+        expect.objectContaining({
+          event_id: expect.stringMatching(/^trending-/),
+          score: expect.any(Number),
+          diversified: false,
+        })
+      ]),
+      metadata: expect.objectContaining({
+        user_id: userId,
+        fallback: 'trending',
+        total_candidates: trendingItems.length,
+      })
+    });
+  });
+
+  /**
+   * Dynamic Diversification: Adaptive algorithm
+   * 
+   * The new system applies diversification based on available candidates
+   * (80% main results + 20% diverse) rather than fixed numbers.
+   * This ensures consistent quality regardless of data volume.
+   */
+  it('should apply dynamic diversification based on candidate volume', async () => {
+    const userId = 'diversification-user';
+    mockContext.req.param.mockReturnValue(userId);
+
+    // Mock moderate candidate set that qualifies for diversification
+    const candidates = Array.from({ length: 40 }, (_, i) => ({
+      id: `event-${i}`,
+      score: 0.9 - (i * 0.02),
+      metadata: { tags: ['tech'], title: `Event ${i}` }
+    }));
+
+    const mockUserVector = Array.from({ length: 1536 }, () => Math.random());
+    
+    vi.mocked(recommendationsService.computeHybridUserVector).mockResolvedValue(mockUserVector);
+    vi.mocked(utils.getABTestGroup).mockResolvedValue('A'); // Group A uses diversification
+    mockVectorIndex.query.mockResolvedValue(candidates);
+    vi.mocked(explorationService.getExplorationRate).mockResolvedValue(0);
+
+    await getRecommendationsRoute(mockContext);
+
+    const response = mockContext.json.mock.calls[0][0];
+    
+    // Should have both main and diversified results
+    const diversifiedCount = response.recommendations.filter((r: any) => r.diversified).length;
+    const mainCount = response.recommendations.filter((r: any) => !r.diversified).length;
+
+    // Verify 80/20 split for diversification
+    expect(diversifiedCount).toBeGreaterThan(0);
+    expect(mainCount).toBeGreaterThan(diversifiedCount);
+    expect(diversifiedCount / (diversifiedCount + mainCount)).toBeCloseTo(0.2, 1);
+  });
+
+  /**
+   * Enhanced Exploration Integration: TinyBird-powered features
+   * 
+   * Tests the integration with TinyBird-powered exploration features:
+   * - Anti-correlated recommendations
+   * - Serendipity items based on user behavior patterns
+   * - Real-time trending injection
+   */
+  it('should integrate TinyBird-powered exploration features proportionally', async () => {
+    const userId = 'exploration-user';
+    mockContext.req.param.mockReturnValue(userId);
+
+    const candidates = Array.from({ length: 60 }, (_, i) => ({
+      id: `event-${i}`,
+      score: 0.8 + (Math.random() * 0.2),
+      metadata: { tags: ['tech'], title: `Event ${i}` }
+    }));
+
+    const mockUserVector = Array.from({ length: 1536 }, () => Math.random());
+    
+    vi.mocked(recommendationsService.computeHybridUserVector).mockResolvedValue(mockUserVector);
+    mockVectorIndex.query.mockResolvedValue(candidates);
+    vi.mocked(explorationService.getExplorationRate).mockResolvedValue(0.4); // High exploration rate
+
+    // Mock Math.random to ensure exploration triggers
+    vi.spyOn(Math, 'random').mockReturnValue(0.3); // Less than exploration rate of 0.4
+
+    // Mock TinyBird exploration services
+    vi.mocked(analytics.getAntiCorrelatedRecommendations).mockResolvedValue([
+      { event_id: 'anti-1', score: 0.7, exploration_type: 'anti_correlated', confidence: 0.6 }
+    ]);
+    vi.mocked(analytics.getSerendipityItems).mockResolvedValue([
+      { event_id: 'serendipity-1', score: 0.75, exploration_type: 'serendipity', confidence: 0.8 }
+    ]);
+    vi.mocked(analytics.getTrendingItems).mockResolvedValue([
+      { event_id: 'trending-1', score: 0.85, exploration_type: 'trending', confidence: 0.9 }
+    ]);
+
+    // Mock exploration injection
+    vi.mocked(explorationService.injectExploration).mockImplementation((recs, items) => [
+      ...recs.slice(0, -items.length),
+      ...items.map(item => ({
+        event_id: item.event_id,
+        score: item.score,
+        diversified: false,
+      }))
+    ]);
+
+    await getRecommendationsRoute(mockContext);
+
+    // Verify proportional exploration calls based on candidate volume (15% of 60 = 9, divided by 3 types = 3 each)
+    expect(analytics.getAntiCorrelatedRecommendations).toHaveBeenCalledWith(mockUserVector, mockVectorIndex, 3);
+    expect(analytics.getSerendipityItems).toHaveBeenCalledWith(userId, mockVectorIndex, mockContext, 3);
+    expect(analytics.getTrendingItems).toHaveBeenCalledWith(mockContext, 3);
+
+    // Verify exploration injection was called
+    expect(explorationService.injectExploration).toHaveBeenCalled();
+  });
+
+  /**
+   * Cache Hit Scenario: Performance optimization verification
+   * 
+   * Tests that cached recommendations are properly transformed to the new response format
+   * while maintaining metadata about the cache hit for debugging.
+   */
+  it('should handle cached recommendations with proper metadata', async () => {
+    const userId = 'cached-user';
+    mockContext.req.param.mockReturnValue(userId);
+
+    const cachedRecs = [
+      { event_id: 'cached-1', score: 0.9, diversified: false },
+      { event_id: 'cached-2', score: 0.8, diversified: true },
+    ];
+
+    mockContext.env.CACHE.get.mockResolvedValue(JSON.stringify(cachedRecs));
+    vi.mocked(explorationService.getExplorationRate).mockResolvedValue(0.2);
+
+    await getRecommendationsRoute(mockContext);
+
+    expect(mockContext.json).toHaveBeenCalledWith({
+      recommendations: cachedRecs,
+      metadata: expect.objectContaining({
+        user_id: userId,
+        cache_hit: true,
+        total_candidates: cachedRecs.length,
+        exploration_rate: 0.2,
+      })
+    });
+
+    // Should not call vector services for cache hits
+    expect(mockVectorIndex.query).not.toHaveBeenCalled();
+    expect(recommendationsService.computeHybridUserVector).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Empty Results Handling: Graceful degradation
+   * 
+   * Tests how the system handles edge cases where no recommendations can be generated,
+   * ensuring the API contract is maintained even in failure scenarios.
+   */
+  it('should handle empty recommendation sets gracefully', async () => {
+    const userId = 'empty-user';
+    mockContext.req.param.mockReturnValue(userId);
+
+    const mockUserVector = Array.from({ length: 1536 }, () => Math.random());
+    
+    vi.mocked(recommendationsService.computeHybridUserVector).mockResolvedValue(mockUserVector);
+    mockVectorIndex.query.mockResolvedValue([]); // No results from vector search
+    
+    // User has very specific tags that don't match anything
+    mockContext.env.CACHE.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(JSON.stringify(['very-specific-tag']));
+
+    await getRecommendationsRoute(mockContext);
+
+    expect(mockContext.json).toHaveBeenCalledWith({
+      recommendations: [],
+      metadata: expect.objectContaining({
+        user_id: userId,
+        total_candidates: 0,
+        cache_hit: false,
+      })
+    });
+  });
+
+  /**
+   * Error Handling: Service resilience
+   * 
+   * Tests that the system gracefully handles failures in the recommendation pipeline
+   * while providing meaningful error context for debugging.
+   */
+  it('should handle recommendation service failures gracefully', async () => {
+    const userId = 'error-user';
+    mockContext.req.param.mockReturnValue(userId);
+
+    vi.mocked(recommendationsService.computeHybridUserVector).mockRejectedValue(
+      new Error('Vector computation failed')
+    );
+
+    await getRecommendationsRoute(mockContext);
+
+    expect(utils.captureWorkerError).toHaveBeenCalledWith(
+      expect.any(Error),
+      { context: 'get-recommendations' }
     );
   });
 
-  it('should filter recommendations based on user tags', async () => {
-    const userId = 'user_with_tags';
-    const context = mockContext(userId);
+  /**
+   * User Preference Filtering: Tag-based recommendation filtering
+   * 
+   * Tests that user-selected tags properly filter the large candidate set,
+   * ensuring personalization works correctly with the new dynamic limits.
+   */
+  it('should filter large candidate sets based on user tag preferences', async () => {
+    const userId = 'filtered-user';
+    mockContext.req.param.mockReturnValue(userId);
 
-    const userTags = ['rock', 'pop'];
-    // The first `get` is for the main recommendations cache, which we want to miss.
-    // The second `get` is for the user tags.
-    mockCache.get
-      .mockResolvedValueOnce(null) // for recs
-      .mockResolvedValueOnce(JSON.stringify(userTags)); // for user_tags
-
-    const mockedComputeVector = recommendationsService.computeHybridUserVector as any;
-    mockedComputeVector.mockResolvedValue(new Array(1536).fill(0.1));
-
-    const vectorResults = [
-      { id: 'evt_tagged_1', score: 0.95, metadata: { tags: ['rock'] } },
-      { id: 'evt_untagged_1', score: 0.94, metadata: { tags: ['jazz'] } },
-      { id: 'evt_tagged_2', score: 0.93, metadata: { tags: ['pop', 'live'] } },
-      { id: 'evt_untagged_2', score: 0.92, metadata: { tags: ['classical'] } },
+    // Mock large candidate set with mixed tags
+    const allCandidates = [
+      ...Array.from({ length: 50 }, (_, i) => ({
+        id: `tech-${i}`,
+        score: 0.9,
+        metadata: { tags: ['tech', 'ai'], title: `Tech Event ${i}` }
+      })),
+      ...Array.from({ length: 50 }, (_, i) => ({
+        id: `music-${i}`,
+        score: 0.8,
+        metadata: { tags: ['music', 'concert'], title: `Music Event ${i}` }
+      }))
     ];
-    mockVectorQuery(vectorResults);
 
-    const response = await getRecommendationsRoute(context);
-    const data = (await response.json()) as { event_id: string }[];
+    const mockUserVector = Array.from({ length: 1536 }, () => Math.random());
+    
+    vi.mocked(recommendationsService.computeHybridUserVector).mockResolvedValue(mockUserVector);
+    mockVectorIndex.query.mockResolvedValue(allCandidates);
+    vi.mocked(explorationService.getExplorationRate).mockResolvedValue(0);
 
-    expect(response.status).toBe(200);
-    expect(data).toHaveLength(2);
-    expect(data.map((d) => d.event_id)).toEqual(['evt_tagged_1', 'evt_tagged_2']);
+    // User prefers tech events
+    mockContext.env.CACHE.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(JSON.stringify(['tech', 'ai']));
+
+    await getRecommendationsRoute(mockContext);
+
+    const response = mockContext.json.mock.calls[0][0];
+    
+    // Should only return tech-related events, filtering out music events
+    expect(response.recommendations.every((r: any) => r.event_id.startsWith('tech-'))).toBe(true);
+    expect(response.recommendations.length).toBe(50); // All tech events
+    expect(response.metadata.total_candidates).toBe(50); // Filtered count
   });
-
-  it('should return an empty array if no candidates remain after filtering', async () => {
-    const userId = 'user_with_unmatched_tags';
-    const context = mockContext(userId);
-
-    const userTags = ['metal'];
-    mockCache.get
-      .mockResolvedValueOnce(null) // for recs
-      .mockResolvedValueOnce(JSON.stringify(userTags)); // for user_tags
-
-    const mockedComputeVector = recommendationsService.computeHybridUserVector as any;
-    mockedComputeVector.mockResolvedValue(new Array(1536).fill(0.1));
-
-    const vectorResults = [
-      { id: 'evt_untagged_1', score: 0.94, metadata: { tags: ['jazz'] } },
-      { id: 'evt_untagged_2', score: 0.92, metadata: { tags: ['classical'] } },
-    ];
-    mockVectorQuery(vectorResults);
-
-    const response = await getRecommendationsRoute(context);
-    const data = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(data).toEqual([]);
-    expect(mockCache.put).not.toHaveBeenCalled();
-  });
-
-  it('should inject exploration items when exploration rate is high', async () => {
-    const userId = 'exploratory_user';
-    const context = mockContext(userId);
-
-    const mockedExploration = explorationService as any;
-    mockedExploration.getExplorationRate.mockResolvedValue(1.0);
-
-    const mockedComputeVector = recommendationsService.computeHybridUserVector as any;
-    mockedComputeVector.mockResolvedValue(new Array(1536).fill(0.1));
-    const vectorResults = [
-      { id: 'evt_rec_1', score: 0.95, metadata: {} },
-      { id: 'evt_rec_2', score: 0.92, metadata: {} },
-    ];
-    mockVectorQuery(vectorResults);
-
-    const explorationItems = [{ event_id: 'evt_explore_1', score: 0.5, diversified: false, id: 'evt_explore_1' }];
-    mockedExploration.injectExploration.mockImplementation((recs: EnrichedRecommendation[]) => [...recs, ...explorationItems]);
-
-    // Mock the chained calls for exploration items
-    mockedExploration.getAntiCorrelatedRecommendations = vi.fn().mockResolvedValue([]);
-    mockedExploration.getSerendipityItems = vi.fn().mockResolvedValue(explorationItems);
-    mockedExploration.getTrendingItems = vi.fn().mockResolvedValue([]);
-
-
-    const response = await getRecommendationsRoute(context);
-    const data = (await response.json()) as { event_id: string }[];
-
-    expect(response.status).toBe(200);
-    expect(data.length).toBe(3);
-    expect(data.map((d) => d.event_id)).toContain('evt_explore_1');
-    expect(explorationService.getExplorationRate).toHaveBeenCalledWith(userId, context.env);
-    expect(explorationService.injectExploration).toHaveBeenCalled();
-    expect(mockCache.put).toHaveBeenCalledTimes(2);
-  });
-}); 
+});
