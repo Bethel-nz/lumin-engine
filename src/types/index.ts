@@ -8,6 +8,12 @@ export interface EnvBindings {
   OPENAI_API_KEY: string;
   TINYBIRD_TOKEN: string;
   TINYBIRD_BASE_URL: string;
+  ENVIRONMENT?: string;
+  MONITORING_ENDPOINT?: string;
+  MONITORING_TOKEN?: string;
+  METRICS_ENDPOINT?: string;
+  METRICS_TOKEN?: string;
+  ALERTS_WEBHOOK?: string;
 }
 
 export interface UserDemographics {
@@ -83,4 +89,52 @@ export interface TrendingItem {
   event_id: string;
   interaction_count: number;
   engagement_rate: number;
+}
+
+export interface UserSimilarity {
+  user_id: string;
+  similar_user_id: string;
+  similarity_score: number;
+  common_interactions: number;
+  last_updated: number;
+}
+
+export interface SimilarityBatchJob {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  user_batch_start: string;
+  user_batch_end: string;
+  created_at: number;
+  started_at?: number;
+  completed_at?: number;
+  processed_users: number;
+  total_similarities: number;
+  error?: string;
+}
+
+export interface CompensationAction {
+  id: string;
+  type: 'rollback' | 'retry' | 'manual_intervention';
+  description: string;
+  payload: Record<string, unknown>;
+  timestamp: number;
+  status: 'pending' | 'completed' | 'failed';
+  retryCount?: number;
+  maxRetries?: number;
+}
+
+export interface LogContext {
+  userId?: string;
+  eventId?: string;
+  requestId?: string;
+  duration?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MetricData {
+  name: string;
+  value: number;
+  unit?: string;
+  tags?: Record<string, string>;
+  timestamp?: number;
 }

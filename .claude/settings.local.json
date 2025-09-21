@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Read(//d/synaxis/**)",
+      "Bash(bun run test:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

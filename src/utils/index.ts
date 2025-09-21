@@ -51,9 +51,6 @@ export const captureWorkerError = <T>(
     error: error.stack,
     ...context,
   });
-
-  // TODO: Send to monitoring service (e.g., Sentry, Datadog, etc.)
-  // This could be implemented with fetch to external monitoring APIs
 };
 
 const hashCode = (str: string): number => {

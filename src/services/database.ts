@@ -89,19 +89,44 @@ export const getSimilarUsers = async (
   userId: string,
   limit = 5
 ): Promise<{ user_id: string; common_interactions: number }[]> => {
+  // First try to get precomputed similarities
+  const precomputed = await db
+    .prepare(`
+      SELECT similar_user_id as user_id, common_interactions
+      FROM user_similarities
+      WHERE user_id = ?
+      AND last_updated > ?
+      ORDER BY similarity_score DESC, common_interactions DESC
+      LIMIT ?
+    `)
+    .bind(userId, Date.now() - 24 * 60 * 60 * 1000, limit) // Use if computed within last 24 hours
+    .all<{ user_id: string; common_interactions: number }>();
+
+  if (precomputed.results && precomputed.results.length > 0) {
+    return precomputed.results;
+  }
+
+  // Fallback to real-time computation with optimized query
   const result = await db
-    .prepare(
-      `SELECT
+    .prepare(`
+      WITH user_interactions AS (
+        SELECT event_id
+        FROM interactions
+        WHERE user_id = ? AND action IN ('like', 'click')
+        LIMIT 100
+      )
+      SELECT
         i2.user_id,
-        COUNT(i1.event_id) as common_interactions
-      FROM interactions i1
-      JOIN interactions i2 ON i1.event_id = i2.event_id AND i1.user_id != i2.user_id
-      WHERE i1.user_id = ? AND i1.action IN ('like', 'click')
+        COUNT(DISTINCT i2.event_id) as common_interactions
+      FROM user_interactions ui
+      JOIN interactions i2 ON ui.event_id = i2.event_id AND i2.user_id != ?
+      WHERE i2.action IN ('like', 'click')
       GROUP BY i2.user_id
+      HAVING common_interactions >= 2
       ORDER BY common_interactions DESC
       LIMIT ?`
     )
-    .bind(userId, limit)
+    .bind(userId, userId, limit)
     .all<{ user_id: string; common_interactions: number }>();
 
   return result.results || [];

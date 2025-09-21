@@ -6,10 +6,13 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "tb:generate": "mkdir -p tinybird/datasources && tb datasource generate --name events__v1 --schema ./src/validation/tinybird-schemas.ts:tinybirdEventSchema --engine MergeTree --output ./tinybird/datasources/events__v1.datasource && tb datasource generate --name interactions__v1 --schema ./src/validation/tinybird-schemas.ts:tinybirdInteractionSchema --engine MergeTree --output ./tinybird/datasources/interactions__v1.datasource",
+    "tb:push": "tb push --force",
+    "tb:deploy": "bun run tb:generate && bun run tb:push"
   },
   "dependencies": {
-    "@chronark/zod-bird": "chronark/zod-bird",
+    "@chronark/zod-bird": "https://github.com/bethel-nz/zod-bird.git",
     "@upstash/vector": "^1.2.0",
     "bcrypt-edge": "^0.1.0",
     "dotenv": "^17.1.0",
