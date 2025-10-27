@@ -10,10 +10,15 @@
     "VECTOR_URL": "",
     "VECTOR_TOKEN": "",
     "X_APP_KEY": "",
-    "AI_API_KEY": "your-embedding-model-api-key",
+    "OPENAI_API_KEY": "your-embedding-model-api-key",
     "AI_BASE_URL":"https://models.github.ai/inference",
     "TINYBIRD_TOKEN": "",
-    "TINYBIRD_BASE_URL": "https://api.tinybird.co"
+    "TINYBIRD_BASE_URL": "https://api.tinybird.co",
+    "ALERTS_WEBHOOK": "your_webhook_endpoint",
+    "MONITORING_ENDPOINT": "https://..."
+	"MONITORING_TOKEN":"..."
+	"METRICS_ENDPOINT":"https://..."
+	"METRICS_TOKEN":"..."
   },
   "kv_namespaces": [
     {
