@@ -11,7 +11,7 @@ export const ingestEventRoute = async (
     const body = await c.req.json();
     const eventData = validateInput(body, ingestEventSchema);
 
-    const { tinybirdResult } = await processEventIngestion(c, eventData, {
+    const { tinybirdResult } = await processEventIngestion(c, eventData!, {
       writeToD1: true,
     });
 
