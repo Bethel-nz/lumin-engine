@@ -17,7 +17,7 @@ export const ingestEventRoute = async (
 
     return c.json({
       success: true,
-      message: `Event ${eventData.id} ingested.`,
+      message: `Event "${eventData.title}" ingested.`,
       tinybird_response: tinybirdResult
     }, 201);
   } catch (e: unknown) {

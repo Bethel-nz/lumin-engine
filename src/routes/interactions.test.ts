@@ -62,8 +62,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       successful_rows: 1,
       quarantined_rows: 0,
     });
-    mockContext.env.CACHE.delete.mockResolvedValue();
-    mockContext.env.CACHE.put.mockResolvedValue();
+    vi.mocked(mockContext.env.CACHE.delete).mockResolvedValue();
+    vi.mocked(mockContext.env.CACHE.put).mockResolvedValue();
 
     // Setup successful default responses
     vi.mocked(tinybird.getTinybirdClient).mockReturnValue(mockTinybirdClient);
@@ -92,8 +92,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       page_depth: 3,
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
@@ -132,8 +132,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       tags: ['ai', 'machine-learning', 'conference'],
     };
 
-    mockContext.req.json.mockResolvedValue(tagInteractionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(tagInteractionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
@@ -173,8 +173,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
 
     // Mock new user scenario
     vi.mocked(database.checkUserExists).mockResolvedValue(false);
-    mockContext.req.json.mockResolvedValue(newUserInteraction);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(newUserInteraction);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
@@ -210,8 +210,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       session_id: 'session-minimal',
     };
 
-    mockContext.req.json.mockResolvedValue(minimalInteraction);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(minimalInteraction);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
@@ -241,8 +241,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       session_id: 'session-fail',
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
     mockIngestEndpoint.mockRejectedValue(new Error('TinyBird service unavailable'));
 
     await logInteractionRoute(mockContext);
@@ -268,7 +268,7 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       // Missing required event_id
     };
 
-    mockContext.req.json.mockResolvedValue(invalidInteraction);
+    vi.mocked(mockContext.req.json).mockResolvedValue(invalidInteraction);
     vi.mocked(utils.validateInput).mockImplementation(() => {
       throw new Error('Validation failed: invalid action type');
     });
@@ -300,8 +300,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       session_id: 'session-db-fail',
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
     vi.mocked(database.checkUserExists).mockRejectedValue(new Error('Database connection failed'));
 
     await logInteractionRoute(mockContext);
@@ -328,8 +328,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
       session_id: 'session-cache',
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
@@ -360,8 +360,8 @@ describe('logInteractionRoute - TinyBird Integration', () => {
         session_id: `session-${action}`,
       };
 
-      mockContext.req.json.mockResolvedValue(interactionData);
-      mockContext.req.header.mockReturnValue(null);
+      vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+      vi.mocked(mockContext.req.header).mockReturnValue(null);
 
       await logInteractionRoute(mockContext);
 

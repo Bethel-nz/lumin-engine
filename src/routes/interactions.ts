@@ -28,12 +28,15 @@ export const logInteractionRoute = async (
       });
     }
 
-    const enrichedInteraction = {
-      ...interactionData,
-      timestamp: Date.now(),
-    };
+    const mockContext = {
+      req: {
+        json: () => Promise.resolve(interactionData),
+      },
+      json: (data: any) => ({ json: data }),
+      env: c.env,
+    } as Context;
 
-    await withRetry(() => ingestInteraction(enrichedInteraction));
+    await withRetry(() => ingestInteraction(mockContext));
 
     if (action === 'select_tags' && tags) {
       await c.env.CACHE.put(`user_tags:${user_id}`, JSON.stringify(tags), {

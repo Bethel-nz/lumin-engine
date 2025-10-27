@@ -11,15 +11,24 @@ export const ingestEventTinybirdRoute = async (
     const body = await c.req.json();
     const eventData = validateInput(body, ingestEventSchema);
 
-    const { tinybirdResult } = await processEventIngestion(c, eventData, {
+    // Ensure tags is always an array
+    const eventDataWithTags = {
+      ...eventData,
+      tags: eventData.tags ?? []
+    };
+
+    const { tinybirdResult } = await processEventIngestion(c, eventDataWithTags, {
       writeToD1: false,
     });
 
-    return c.json({
-      success: true,
-      message: `Event ${eventData.id} ingested.`,
-      tinybird_response: tinybirdResult
-    }, 201);
+    return c.json(
+      {
+        success: true,
+        message: `Event ${eventData.title} ingested.`,
+        tinybird_response: tinybirdResult,
+      },
+      201
+    );
   } catch (e: unknown) {
     return handleError(c, e, 'Failed to ingest event');
   }

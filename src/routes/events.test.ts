@@ -114,7 +114,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
       quarantined_rows: 0,
     };
 
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
     mockIngestEndpoint.mockResolvedValue(mockTinybirdResponse);
 
@@ -175,7 +175,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
 
     const mockVector = [0.4, 0.5, 0.6];
     
-    mockContext.req.json.mockResolvedValue(minimalEventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(minimalEventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
 
     await ingestEventRoute(mockContext);
@@ -218,7 +218,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
 
     const zeroVector = [0, 0, 0]; // Indicates embedding service failure
     
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue(zeroVector);
 
     await ingestEventRoute(mockContext);
@@ -246,7 +246,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
       tags: ['fail'],
     };
 
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockIngestEndpoint.mockRejectedValue(new Error('TinyBird API Timeout'));
 
@@ -272,7 +272,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
       tags: ['fail'],
     };
 
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockVectorIndex.upsert.mockRejectedValue(new Error('Vector store unavailable'));
 
@@ -297,7 +297,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
       tags: [], // Empty tags array
     };
 
-    mockContext.req.json.mockResolvedValue(invalidEventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(invalidEventData);
     vi.mocked(utils.validateInput).mockImplementation(() => {
       throw new Error('Validation failed: ID is required');
     });
@@ -329,7 +329,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
       tags: ['performance'],
     };
 
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     
     // Set up mocks to track calls
     const embeddingMock = vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);

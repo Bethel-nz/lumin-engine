@@ -58,8 +58,8 @@ describe('logInteractionRoute with TinyBird', () => {
       duration_ms: 5000,
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header)
       .mockReturnValueOnce('192.168.1.100')
       .mockReturnValueOnce('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
       .mockReturnValueOnce('https://example.com/events');
@@ -89,8 +89,8 @@ describe('logInteractionRoute with TinyBird', () => {
       session_id: 'session-mobile',
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header)
       .mockReturnValueOnce('10.0.0.1')
       .mockReturnValueOnce('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1)')
       .mockReturnValueOnce(null);
@@ -111,8 +111,8 @@ describe('logInteractionRoute with TinyBird', () => {
       session_id: 'session-tablet',
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header)
       .mockReturnValueOnce(null)
       .mockReturnValueOnce('Mozilla/5.0 (iPad; CPU OS 15_0)')
       .mockReturnValueOnce(null);
@@ -134,8 +134,8 @@ describe('logInteractionRoute with TinyBird', () => {
       tags: ['tech', 'conference'],
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
@@ -160,8 +160,8 @@ describe('logInteractionRoute with TinyBird', () => {
     };
 
     vi.mocked(database.checkUserExists).mockResolvedValue(false);
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
@@ -189,8 +189,8 @@ describe('logInteractionRoute with TinyBird', () => {
       session_id: 'session-fail',
     };
 
-    mockContext.req.json.mockResolvedValue(interactionData);
-    mockContext.req.header.mockReturnValue(null);
+    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+    vi.mocked(mockContext.req.header).mockReturnValue(null);
     mockIngestEndpoint.mockRejectedValue(new Error('TinyBird API Error'));
 
     await logInteractionRoute(mockContext);
@@ -205,7 +205,7 @@ describe('logInteractionRoute with TinyBird', () => {
   it('should handle validation errors', async () => {
     const invalidData = { user_id: 'user', action: 'invalid' };
 
-    mockContext.req.json.mockResolvedValue(invalidData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(invalidData);
     vi.mocked(utils.validateInput).mockImplementation(() => {
       throw new Error('Validation failed');
     });

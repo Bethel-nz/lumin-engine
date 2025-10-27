@@ -62,10 +62,10 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
 
     // Reset individual mock functions that were cleared by resetAllMocks
     mockVectorIndex.query.mockResolvedValue([]);
-    mockContext.env.CACHE.get.mockResolvedValue(null);
-    mockContext.env.CACHE.put.mockResolvedValue();
-    mockContext.req.param.mockReturnValue('test-user');
-    mockContext.json.mockReturnValue({});
+    vi.mocked(mockContext.env.CACHE.get).mockResolvedValue(null);
+    vi.mocked(mockContext.env.CACHE.put).mockResolvedValue();
+    vi.mocked(mockContext.req.param).mockReturnValue('test-user');
+    vi.mocked(mockContext.json).mockReturnValue({});
 
     // Reset utility mocks
     vi.mocked(utils.getABTestGroup).mockResolvedValue('B');
@@ -97,7 +97,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should return all relevant recommendations without artificial limits', async () => {
     const userId = 'user-unlimited';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     // Mock a large set of relevant recommendations (simulating rich data)
     const largeCandidateSet = Array.from({ length: 150 }, (_, i) => ({
@@ -165,7 +165,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should use TinyBird trending data for cold start users', async () => {
     const userId = 'cold-start-user';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     const zeroVector = new Array(1536).fill(0); // Indicates no user history
     const trendingItems: ExplorationItem[] = Array.from({ length: 75 }, (_, i) => ({
@@ -209,7 +209,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should apply dynamic diversification based on candidate volume', async () => {
     const userId = 'diversification-user';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     // Mock moderate candidate set that qualifies for diversification
     const candidates = Array.from({ length: 40 }, (_, i) => ({
@@ -249,7 +249,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should integrate TinyBird-powered exploration features proportionally', async () => {
     const userId = 'exploration-user';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     const candidates = Array.from({ length: 60 }, (_, i) => ({
       id: `event-${i}`,
@@ -306,14 +306,14 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should handle cached recommendations with proper metadata', async () => {
     const userId = 'cached-user';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     const cachedRecs = [
       { event_id: 'cached-1', score: 0.9, diversified: false },
       { event_id: 'cached-2', score: 0.8, diversified: true },
     ];
 
-    mockContext.env.CACHE.get.mockResolvedValue(JSON.stringify(cachedRecs));
+    vi.mocked(mockContext.env.CACHE.get).mockResolvedValue(JSON.stringify(cachedRecs));
     vi.mocked(explorationService.getExplorationRate).mockResolvedValue(0.2);
 
     await getRecommendationsRoute(mockContext);
@@ -341,7 +341,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should handle empty recommendation sets gracefully', async () => {
     const userId = 'empty-user';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     const mockUserVector = Array.from({ length: 1536 }, () => Math.random());
     
@@ -373,7 +373,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should handle recommendation service failures gracefully', async () => {
     const userId = 'error-user';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     vi.mocked(recommendationsService.computeHybridUserVector).mockRejectedValue(
       new Error('Vector computation failed')
@@ -395,7 +395,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
    */
   it('should filter large candidate sets based on user tag preferences', async () => {
     const userId = 'filtered-user';
-    mockContext.req.param.mockReturnValue(userId);
+    vi.mocked(mockContext.req.param).mockReturnValue(userId);
 
     // Mock large candidate set with mixed tags
     const allCandidates = [

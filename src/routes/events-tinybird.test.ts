@@ -23,9 +23,9 @@ vi.mock('../utils', async (importOriginal) => {
 describe('ingestEventRoute with TinyBird', () => {
   const mockContext = {
     req: {
-      json: vi.fn(),
+      json: vi.fn().mockResolvedValue({}),
     },
-    json: vi.fn(),
+    json: vi.fn().mockReturnValue({}),
     env: {
       TINYBIRD_TOKEN: 'test-token',
       TINYBIRD_BASE_URL: 'https://api.tinybird.co',
@@ -71,7 +71,7 @@ describe('ingestEventRoute with TinyBird', () => {
       quarantined_rows: 0,
     };
 
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
     mockIngestEndpoint.mockResolvedValue(mockTinybirdResponse);
 
@@ -120,7 +120,7 @@ describe('ingestEventRoute with TinyBird', () => {
 
     const mockVector = [0.1, 0.2, 0.3];
     
-    mockContext.req.json.mockResolvedValue(minimalEventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(minimalEventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
 
     await ingestEventRoute(mockContext);
@@ -155,7 +155,7 @@ describe('ingestEventRoute with TinyBird', () => {
 
     const zeroVector = [0, 0, 0];
     
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue(zeroVector);
 
     await ingestEventRoute(mockContext);
@@ -176,7 +176,7 @@ describe('ingestEventRoute with TinyBird', () => {
       tags: ['fail'],
     };
 
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockIngestEndpoint.mockRejectedValue(new Error('TinyBird API Error'));
 
@@ -196,7 +196,7 @@ describe('ingestEventRoute with TinyBird', () => {
       tags: ['fail'],
     };
 
-    mockContext.req.json.mockResolvedValue(eventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockVectorIndex.upsert.mockRejectedValue(new Error('Vector API Error'));
 
@@ -214,7 +214,7 @@ describe('ingestEventRoute with TinyBird', () => {
       title: 'No ID Event',
     };
 
-    mockContext.req.json.mockResolvedValue(invalidEventData);
+    vi.mocked(mockContext.req.json).mockResolvedValue(invalidEventData);
     vi.mocked(utils.validateInput).mockImplementation(() => {
       throw new Error('Validation failed');
     });
