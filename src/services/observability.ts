@@ -8,13 +8,27 @@ export enum LogLevel {
   CRITICAL = 4,
 }
 
-export interface LogContext {
-  userId?: string;
-  eventId?: string;
-  requestId?: string;
-  duration?: number;
-  metadata?: Record<string, unknown>;
-}
+/**
+ * Represents a JSON-serializable object with any level of nesting.
+ */
+export type JsonObject = {
+  [key: string]: JsonValue;
+};
+
+/**
+ * Represents any valid JSON-serializable value.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | unknown
+  | JsonValue[] // An array of JsonValues
+  | JsonObject; // A JsonObject
+
+export type LogContext = JsonObject;
 
 export interface MetricData {
   name: string;
@@ -37,7 +51,11 @@ class Logger {
     return level >= this.minLevel;
   }
 
-  private formatLog(level: LogLevel, message: string, context?: LogContext): string {
+  private formatLog(
+    level: LogLevel,
+    message: string,
+    context?: LogContext
+  ): string {
     const logEntry = {
       timestamp: new Date().toISOString(),
       level: LogLevel[level],
@@ -49,7 +67,11 @@ class Logger {
     return JSON.stringify(logEntry);
   }
 
-  private async sendToMonitoring(level: LogLevel, message: string, context?: LogContext): Promise<void> {
+  private async sendToMonitoring(
+    level: LogLevel,
+    message: string,
+    context?: LogContext
+  ): Promise<void> {
     if (!this.env.MONITORING_ENDPOINT) return;
 
     try {
@@ -66,7 +88,7 @@ class Logger {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.env.MONITORING_TOKEN}`,
+          Authorization: `Bearer ${this.env.MONITORING_TOKEN}`,
         },
         body: JSON.stringify(logData),
       });
@@ -96,27 +118,35 @@ class Logger {
     if (!this.shouldLog(LogLevel.ERROR)) return;
     const errorContext = {
       ...context,
-      error: error ? {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      } : undefined,
+      error: error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : undefined,
     };
     console.error(this.formatLog(LogLevel.ERROR, message, errorContext));
-    this.sendToMonitoring(LogLevel.ERROR, message, errorContext).catch(() => {});
+    this.sendToMonitoring(LogLevel.ERROR, message, errorContext).catch(
+      () => {}
+    );
   }
 
   critical(message: string, error?: Error, context?: LogContext): void {
     const errorContext = {
       ...context,
-      error: error ? {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      } : undefined,
+      error: error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : undefined,
     };
     console.error(this.formatLog(LogLevel.CRITICAL, message, errorContext));
-    this.sendToMonitoring(LogLevel.CRITICAL, message, errorContext).catch(() => {});
+    this.sendToMonitoring(LogLevel.CRITICAL, message, errorContext).catch(
+      () => {}
+    );
   }
 }
 
@@ -142,7 +172,11 @@ class MetricsCollector {
     }
   }
 
-  recordTiming(name: string, duration: number, tags?: Record<string, string>): void {
+  recordTiming(
+    name: string,
+    duration: number,
+    tags?: Record<string, string>
+  ): void {
     this.record({
       name,
       value: duration,
@@ -171,7 +205,7 @@ class MetricsCollector {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.env.METRICS_TOKEN}`,
+          Authorization: `Bearer ${this.env.METRICS_TOKEN}`,
         },
         body: JSON.stringify({ metrics }),
       });
@@ -189,7 +223,8 @@ class MetricsCollector {
 }
 
 export const createLogger = (env: EnvBindings): Logger => new Logger(env);
-export const createMetricsCollector = (env: EnvBindings): MetricsCollector => new MetricsCollector(env);
+export const createMetricsCollector = (env: EnvBindings): MetricsCollector =>
+  new MetricsCollector(env);
 
 export const withTiming = async <T>(
   name: string,

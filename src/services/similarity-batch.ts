@@ -1,5 +1,9 @@
 import type { EnvBindings } from '../types';
-import { createLogger, createMetricsCollector, withTiming } from './observability';
+import {
+  createLogger,
+  createMetricsCollector,
+  withTiming,
+} from './observability';
 
 export interface UserSimilarity {
   user_id: string;
@@ -39,29 +43,34 @@ export class SimilarityPrecomputer {
 
   async createSimilarityBatchJobs(): Promise<string[]> {
     const activeUsers = await this.db
-      .prepare(`
+      .prepare(
+        `
         SELECT DISTINCT user_id
         FROM interactions
         WHERE timestamp > ?
         ORDER BY user_id
-      `)
+      `
+      )
       .bind(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
       .all<{ user_id: string }>();
 
-    const users = (activeUsers.results || []).map(r => r.user_id);
+    const users = (activeUsers.results || []).map((r) => r.user_id);
     const jobIds: string[] = [];
 
     for (let i = 0; i < users.length; i += this.batchSize) {
       const batchStart = users[i];
-      const batchEnd = users[Math.min(i + this.batchSize - 1, users.length - 1)];
+      const batchEnd =
+        users[Math.min(i + this.batchSize - 1, users.length - 1)];
       const jobId = crypto.randomUUID();
 
       await this.db
-        .prepare(`
+        .prepare(
+          `
           INSERT INTO similarity_batch_jobs
           (id, status, user_batch_start, user_batch_end, created_at, processed_users, total_similarities)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `)
+        `
+        )
         .bind(jobId, 'pending', batchStart, batchEnd, Date.now(), 0, 0)
         .run();
 
@@ -71,7 +80,7 @@ export class SimilarityPrecomputer {
     this.logger.info('Created similarity batch jobs', {
       totalJobs: jobIds.length,
       totalUsers: users.length,
-      batchSize: this.batchSize
+      batchSize: this.batchSize,
     });
 
     return jobIds;
@@ -88,14 +97,16 @@ export class SimilarityPrecomputer {
     }
 
     await this.db
-      .prepare('UPDATE similarity_batch_jobs SET status = ?, started_at = ? WHERE id = ?')
+      .prepare(
+        'UPDATE similarity_batch_jobs SET status = ?, started_at = ? WHERE id = ?'
+      )
       .bind('running', Date.now(), jobId)
       .run();
 
     this.logger.info('Starting similarity batch job', {
       jobId,
       userBatchStart: job.user_batch_start,
-      userBatchEnd: job.user_batch_end
+      userBatchEnd: job.user_batch_end,
     });
 
     try {
@@ -107,24 +118,33 @@ export class SimilarityPrecomputer {
       );
 
       await this.db
-        .prepare(`
+        .prepare(
+          `
           UPDATE similarity_batch_jobs
           SET status = ?, completed_at = ?, processed_users = ?, total_similarities = ?
           WHERE id = ?
-        `)
-        .bind('completed', Date.now(), result.processedUsers, result.totalSimilarities, jobId)
+        `
+        )
+        .bind(
+          'completed',
+          Date.now(),
+          result.processedUsers,
+          result.totalSimilarities,
+          jobId
+        )
         .run();
 
       this.logger.info('Completed similarity batch job', {
         jobId,
         processedUsers: result.processedUsers,
-        totalSimilarities: result.totalSimilarities
+        totalSimilarities: result.totalSimilarities,
       });
-
     } catch (error) {
       const err = error as Error;
       await this.db
-        .prepare('UPDATE similarity_batch_jobs SET status = ?, error = ? WHERE id = ?')
+        .prepare(
+          'UPDATE similarity_batch_jobs SET status = ?, error = ? WHERE id = ?'
+        )
         .bind('failed', err.message, jobId)
         .run();
 
@@ -139,17 +159,19 @@ export class SimilarityPrecomputer {
   }> {
     // Get users in this batch with their interactions
     const batchUsers = await this.db
-      .prepare(`
+      .prepare(
+        `
         SELECT DISTINCT user_id
         FROM interactions
         WHERE user_id >= ? AND user_id <= ?
         AND action IN ('like', 'click')
         ORDER BY user_id
-      `)
+      `
+      )
       .bind(job.user_batch_start, job.user_batch_end)
       .all<{ user_id: string }>();
 
-    const users = (batchUsers.results || []).map(r => r.user_id);
+    const users = (batchUsers.results || []).map((r) => r.user_id);
     let processedUsers = 0;
     let totalSimilarities = 0;
 
@@ -169,7 +191,7 @@ export class SimilarityPrecomputer {
           jobId: job.id,
           processedUsers,
           totalUsers: users.length,
-          totalSimilarities
+          totalSimilarities,
         });
       }
     }
@@ -177,10 +199,13 @@ export class SimilarityPrecomputer {
     return { processedUsers, totalSimilarities };
   }
 
-  private async computeUserSimilarities(userId: string): Promise<UserSimilarity[]> {
+  private async computeUserSimilarities(
+    userId: string
+  ): Promise<UserSimilarity[]> {
     // Use optimized query with better indexing strategy
     const similarities = await this.db
-      .prepare(`
+      .prepare(
+        `
         WITH user_events AS (
           SELECT DISTINCT event_id
           FROM interactions
@@ -209,7 +234,8 @@ export class SimilarityPrecomputer {
         FROM similar_users
         ORDER BY similarity_score DESC, common_interactions DESC
         LIMIT 20
-      `)
+      `
+      )
       .bind(userId, userId, this.similarityThreshold)
       .all<{
         similar_user_id: string;
@@ -217,16 +243,19 @@ export class SimilarityPrecomputer {
         similarity_score: number;
       }>();
 
-    return (similarities.results || []).map(row => ({
+    return (similarities.results || []).map((row) => ({
       user_id: userId,
       similar_user_id: row.similar_user_id,
       similarity_score: row.similarity_score,
       common_interactions: row.common_interactions,
-      last_updated: Date.now()
+      last_updated: Date.now(),
     }));
   }
 
-  private async storeSimilarities(userId: string, similarities: UserSimilarity[]): Promise<void> {
+  private async storeSimilarities(
+    userId: string,
+    similarities: UserSimilarity[]
+  ): Promise<void> {
     // Clear existing similarities for this user
     await this.db
       .prepare('DELETE FROM user_similarities WHERE user_id = ?')
@@ -238,20 +267,22 @@ export class SimilarityPrecomputer {
     for (let i = 0; i < similarities.length; i += batchSize) {
       const batch = similarities.slice(i, i + batchSize);
       const values = batch.map(() => '(?, ?, ?, ?, ?)').join(', ');
-      const params = batch.flatMap(s => [
+      const params = batch.flatMap((s) => [
         s.user_id,
         s.similar_user_id,
         s.similarity_score,
         s.common_interactions,
-        s.last_updated
+        s.last_updated,
       ]);
 
       await this.db
-        .prepare(`
+        .prepare(
+          `
           INSERT INTO user_similarities
           (user_id, similar_user_id, similarity_score, common_interactions, last_updated)
           VALUES ${values}
-        `)
+        `
+        )
         .bind(...params)
         .run();
     }
@@ -260,34 +291,42 @@ export class SimilarityPrecomputer {
   async getPrecomputedSimilarUsers(
     userId: string,
     limit = 5
-  ): Promise<{ user_id: string; common_interactions: number; similarity_score: number }[]> {
+  ): Promise<
+    { user_id: string; common_interactions: number; similarity_score: number }[]
+  > {
     const result = await this.db
-      .prepare(`
+      .prepare(
+        `
         SELECT similar_user_id as user_id, common_interactions, similarity_score
         FROM user_similarities
         WHERE user_id = ?
         ORDER BY similarity_score DESC, common_interactions DESC
         LIMIT ?
-      `)
+      `
+      )
       .bind(userId, limit)
-      .all<{ user_id: string; common_interactions: number; similarity_score: number }>();
+      .all<{
+        user_id: string;
+        common_interactions: number;
+        similarity_score: number;
+      }>();
 
     return result.results || [];
   }
 
   async cleanupOldSimilarities(olderThanDays = 7): Promise<number> {
-    const cutoffTime = Date.now() - (olderThanDays * 24 * 60 * 60 * 1000);
+    const cutoffTime = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
     const result = await this.db
       .prepare('DELETE FROM user_similarities WHERE last_updated < ?')
       .bind(cutoffTime)
       .run();
 
     this.logger.info('Cleaned up old similarities', {
-      deletedRows: result.changes,
-      olderThanDays
+      deletedRows: result.meta.changes,
+      olderThanDays,
     });
 
-    return result.changes || 0;
+    return result.meta.changes || 0;
   }
 
   async scheduleRegularRecomputation(): Promise<void> {
@@ -306,17 +345,19 @@ export class SimilarityPrecomputer {
 
         await this.cleanupOldSimilarities();
         this.logger.info('Completed scheduled similarity recomputation', {
-          processedJobs: jobIds.length
+          processedJobs: jobIds.length,
         });
-
       } catch (error) {
-        this.logger.error('Failed scheduled similarity recomputation', error as Error);
+        this.logger.error(
+          'Failed scheduled similarity recomputation',
+          error as Error
+        );
       }
     };
 
     setInterval(runRecomputation, recomputeInterval);
     this.logger.info('Scheduled regular similarity recomputation', {
-      intervalHours: 6
+      intervalHours: 6,
     });
   }
 }

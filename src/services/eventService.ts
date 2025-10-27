@@ -29,10 +29,11 @@ export const processEventIngestion = async (
   const logger = createLogger(c.env);
   const metrics = createMetricsCollector(c.env);
   const requestId = crypto.randomUUID();
+  const eventId = crypto.randomUUID();
 
   logger.info('Starting event ingestion', {
     requestId,
-    eventId: eventData.id,
+    eventId,
     writeToD1: options.writeToD1
   });
 
@@ -60,7 +61,7 @@ export const processEventIngestion = async (
           'embedding_generation',
           () => generateEmbedding(embeddingText, openai),
           metrics,
-          { eventId: eventData.id }
+          { eventId }
         ),
         withTiming(
           'tinybird_ingestion',
@@ -70,7 +71,7 @@ export const processEventIngestion = async (
             updated_at: Date.now(),
           })),
           metrics,
-          { eventId: eventData.id }
+          { eventId }
         )
       ]);
 
@@ -84,9 +85,9 @@ export const processEventIngestion = async (
       const compensationAction: CompensationAction = {
         id: crypto.randomUUID(),
         type: 'manual_intervention',
-        description: `Failed initial operations for event ${eventData.id}`,
+        description: `Failed initial operations for event ${eventId}`,
         payload: {
-          eventId: eventData.id,
+          eventId,
           eventData,
           error: (error as Error).message,
           completedOperations
@@ -103,7 +104,7 @@ export const processEventIngestion = async (
         'vector_upsert',
         () => vectorIndex.upsert([
           {
-            id: eventData.id,
+            id: eventId,
             vector,
             metadata: {
               title: eventData.title,
@@ -115,7 +116,7 @@ export const processEventIngestion = async (
           },
         ]),
         metrics,
-        { eventId: eventData.id }
+        { eventId }
       );
 
       completedOperations.push('vector_upsert');
@@ -124,7 +125,7 @@ export const processEventIngestion = async (
         await withTiming(
           'd1_insert',
           () => db.insert(schema.events).values({
-            id: eventData.id,
+            id: eventId,
             metadata: {
               title: eventData.title,
               host: eventData.host,
@@ -133,7 +134,7 @@ export const processEventIngestion = async (
             }
           }),
           metrics,
-          { eventId: eventData.id }
+          { eventId }
         );
 
         completedOperations.push('d1_insert');
@@ -159,7 +160,7 @@ export const processEventIngestion = async (
         type: 'rollback',
         description: `Partial failure in event ingestion for ${eventData.id}`,
         payload: {
-          eventId: eventData.id,
+          eventId,
           operations: completedOperations,
           failedOperation,
           eventData,
