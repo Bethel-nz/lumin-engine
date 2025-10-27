@@ -48,6 +48,7 @@ export const getTinybirdClient = (
   c: Context<{ Bindings: EnvBindings }>
 ): LuminTinybirdClient => {
   return new Tinybird({
+    baseUrl: c.env.TINYBIRD_BASE_URL,
     token: c.env.TINYBIRD_TOKEN,
     ...luminClientConfig,
   });
