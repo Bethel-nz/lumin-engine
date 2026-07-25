@@ -17,7 +17,7 @@
   "dependencies": {
     "@better-auth/api-key": "^1.6.18",
     "@upstash/vector": "^1.2.3",
-    "@vyr-e/tinykit": "0.2.0",
+    "@vyr-e/tinykit": "0.2.1",
     "better-auth": "^1.6.18",
     "dotenv": "^17.4.2",
     "drizzle-orm": "0.39.3",

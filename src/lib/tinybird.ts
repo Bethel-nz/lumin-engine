@@ -120,7 +120,7 @@ export const createInteractionIngestionEndpoint = (tb: LuminTinybirdClient) => {
       session_id: validatedData.session_id,
       source: validatedData.source,
       duration_ms: validatedData.duration_ms ?? null,
-      tags: validatedData.tags ?? null,
+      tags: validatedData.tags ?? [],
       metadata: validatedData.metadata
         ? JSON.stringify(validatedData.metadata)
         : null,

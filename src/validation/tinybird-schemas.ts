@@ -44,7 +44,7 @@ export const interactionsSchema = defineSchema({
   duration_ms: nullable('duration_ms', z.number().int(), {
     innerType: 'Int64',
   }),
-  tags: nullable('tags', z.array(z.string()), { innerType: 'Array(String)' }),
+  tags: array('tags', z.string(), { innerType: 'String' }),
   timestamp: int64('timestamp'),
   metadata: nullable('metadata', z.string(), { innerType: 'String' }),
 });
