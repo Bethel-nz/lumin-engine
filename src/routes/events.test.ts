@@ -6,6 +6,7 @@ import * as tinybird from '../lib/tinybird';
 import * as vector from '../services/vector';
 import * as utils from '../utils';
 import { drizzle } from 'drizzle-orm/d1';
+import { createD1Mock } from '../lib/test-utils';
 import type { EnvBindings } from '../types';
 
 // Mock external dependencies - these are the integration points that would fail in isolation
@@ -43,8 +44,8 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     env: {
       TINYBIRD_TOKEN: 'test-token',
       TINYBIRD_BASE_URL: 'https://api.tinybird.co',
-      DB: {},
-    } as EnvBindings,
+      DB: createD1Mock(),
+    } as unknown as EnvBindings,
   } as unknown as Context<{ Bindings: EnvBindings }>;
 
   // Mock implementations - these represent successful external service calls
@@ -65,6 +66,9 @@ describe('ingestEventRoute - TinyBird Integration', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+
+    // resetAllMocks strips the chainable implementations, so rebuild D1 each time
+    (mockContext.env as unknown as { DB: unknown }).DB = createD1Mock();
 
     // Reset individual mock functions that were cleared by resetAllMocks
     mockVectorIndex.upsert.mockResolvedValue({ success: true });
@@ -124,8 +128,6 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     expect(tinybird.getTinybirdClient).toHaveBeenCalledWith(mockContext);
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...eventData,
-      created_at: expect.any(Number),
-      updated_at: expect.any(Number),
     });
 
     // Verify embedding generation uses all available text for better semantic understanding
@@ -134,8 +136,11 @@ describe('ingestEventRoute - TinyBird Integration', () => {
       mockOpenAI
     );
 
-    // Verify D1 reference storage for transactional queries
-    expect(mockDB.insert).toHaveBeenCalledWith(expect.anything());
+    // Verify D1 reference storage for transactional queries. persistEventToD1
+    // batches raw prepared statements rather than going through drizzle.
+    expect(
+      (mockContext.env.DB as unknown as ReturnType<typeof createD1Mock>).batch
+    ).toHaveBeenCalled();
 
     // Verify vector storage with comprehensive metadata for filtering
     expect(mockVectorIndex.upsert).toHaveBeenCalledWith([
@@ -155,7 +160,8 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     // Verify response includes TinyBird confirmation for operational visibility
     expect(mockContext.json).toHaveBeenCalledWith({
       success: true,
-      message: 'Event event-123 ingested.',
+      event_id: 'event-123',
+      message: 'Event "AI Conference 2025" ingested.',
       tinybird_response: mockTinybirdResponse,
     }, 201);
   });
@@ -183,8 +189,6 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     // Verify TinyBird gets minimal data with timestamps
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...minimalEventData,
-      created_at: expect.any(Number),
-      updated_at: expect.any(Number),
     });
 
     // Verify vector metadata handles missing fields gracefully
@@ -252,10 +256,16 @@ describe('ingestEventRoute - TinyBird Integration', () => {
 
     await ingestEventRoute(mockContext);
 
-    expect(utils.handleError).toHaveBeenCalledWith(
-      mockContext,
-      expect.any(Error),
-      'Failed to ingest event'
+    // A TinyBird outage is queued for compensation rather than failing the
+    // request - the embedding and vector write still have to land.
+    expect(utils.handleError).not.toHaveBeenCalled();
+    expect(mockVectorIndex.upsert).toHaveBeenCalled();
+    expect(mockContext.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        event_id: 'event-tinybird-fail',
+      }),
+      201
     );
   });
 

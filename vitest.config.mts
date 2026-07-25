@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import path from 'path';
 
 export default defineConfig({
@@ -7,7 +7,7 @@ export default defineConfig({
     environment: 'node',
     reporters: ['verbose'],
     setupFiles: ['./src/lib/test-utils.ts'],
-    exclude: ['src/db/schema/**/*.ts'],
+    exclude: [...configDefaults.exclude, 'src/db/schema/**/*.ts'],
     isolate: true,  // Run tests in isolation
     pool: 'threads',
     poolOptions: {

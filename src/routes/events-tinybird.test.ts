@@ -5,6 +5,7 @@ import * as clients from '../lib/clients';
 import * as tinybird from '../lib/tinybird';
 import * as vector from '../services/vector';
 import * as utils from '../utils';
+import { createD1Mock } from '../lib/test-utils';
 import type { EnvBindings } from '../types';
 
 vi.mock('../lib/clients');
@@ -29,7 +30,8 @@ describe('ingestEventRoute with TinyBird', () => {
     env: {
       TINYBIRD_TOKEN: 'test-token',
       TINYBIRD_BASE_URL: 'https://api.tinybird.co',
-    } as EnvBindings,
+      DB: createD1Mock(),
+    } as unknown as EnvBindings,
   } as unknown as Context<{ Bindings: EnvBindings }>;
 
   const mockVectorIndex = {
@@ -81,8 +83,6 @@ describe('ingestEventRoute with TinyBird', () => {
     expect(tinybird.createEventIngestionEndpoint).toHaveBeenCalledWith(mockTinybirdClient);
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...eventData,
-      created_at: expect.any(Number),
-      updated_at: expect.any(Number),
     });
 
     expect(vector.generateEmbedding).toHaveBeenCalledWith(
@@ -106,7 +106,8 @@ describe('ingestEventRoute with TinyBird', () => {
 
     expect(mockContext.json).toHaveBeenCalledWith({
       success: true,
-      message: 'Event event-123 ingested.',
+      event_id: 'event-123',
+      message: 'Event "Test Event" ingested.',
       tinybird_response: mockTinybirdResponse,
     }, 201);
   });
@@ -127,8 +128,6 @@ describe('ingestEventRoute with TinyBird', () => {
 
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...minimalEventData,
-      created_at: expect.any(Number),
-      updated_at: expect.any(Number),
     });
 
     expect(mockVectorIndex.upsert).toHaveBeenCalledWith([
@@ -182,10 +181,16 @@ describe('ingestEventRoute with TinyBird', () => {
 
     await ingestEventRoute(mockContext);
 
-    expect(utils.handleError).toHaveBeenCalledWith(
-      mockContext,
-      expect.any(Error),
-      'Failed to ingest event'
+    // A TinyBird outage is queued for compensation rather than failing the
+    // request - the embedding and vector write still have to land.
+    expect(utils.handleError).not.toHaveBeenCalled();
+    expect(mockVectorIndex.upsert).toHaveBeenCalled();
+    expect(mockContext.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        event_id: 'event-tinybird-fail',
+      }),
+      201
     );
   });
 
