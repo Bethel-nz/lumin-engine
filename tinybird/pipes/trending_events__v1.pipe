@@ -1,35 +1,18 @@
 NODE endpoint
 SQL >
     %
-    SELECT
-          interactions.event_id AS event_id,
-          any(events.title) AS title,
-          any(events.category) AS category,
-          count() AS interaction_count,
-          countIf(interactions.action IN ('like', 'click')) / greatest(count(), 1) AS engagement_rate
-        FROM
-        (
-          SELECT id, any(user_id) AS user_id, any(event_id) AS event_id,
-                 any(action) AS action, max(timestamp) AS timestamp
-          FROM interactions__v1
-          GROUP BY id
-        ) AS interactions
-        INNER JOIN
-        (
-          SELECT id, argMax(title, updated_at) AS title,
-                 argMax(category, updated_at) AS category
-          FROM events__v1
-          GROUP BY id
-        ) AS events ON events.id = interactions.event_id
-        WHERE interactions.timestamp >= toUnixTimestamp64Milli(
-          now64(3) - INTERVAL {{ Int64(hours, 24) }} HOUR
-        )
-        AND (
-          {{ String(category, '') }} = ''
-          OR events.category = {{ String(category, '') }}
-        )
-        GROUP BY interactions.event_id
-        ORDER BY engagement_rate DESC, interaction_count DESC
-        LIMIT {{ Int64(limit, 10) }}
+    WITH interactions AS (SELECT id, any(user_id) AS user_id, any(event_id) AS event_id, any(action) AS action, max(timestamp) AS timestamp
+    FROM interactions__v1
+    GROUP BY id),
+    events AS (SELECT id, argMax(title, updated_at) AS title, argMax(category, updated_at) AS category
+    FROM events__v1
+    GROUP BY id)
+    SELECT interactions.event_id AS event_id, any(events.title) AS title, any(events.category) AS category, count() AS interaction_count, countIf(interactions.action IN ('like', 'click')) / greatest(count(), 1) AS engagement_rate
+    FROM interactions
+    INNER JOIN events ON events.id = interactions.event_id
+    WHERE interactions.timestamp >= toUnixTimestamp64Milli(now64(3) - INTERVAL {{ Int64(hours, 24) }} HOUR) AND ({{ String(category, '') }} = '' OR events.category = {{ String(category, '') }})
+    GROUP BY interactions.event_id
+    ORDER BY engagement_rate DESC, interaction_count DESC
+    LIMIT {{ Int64(limit, 10) }}
 
 TYPE endpoint
