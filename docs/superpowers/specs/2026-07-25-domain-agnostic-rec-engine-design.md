@@ -1,0 +1,128 @@
+# Domain-agnostic recommendation engine
+
+Date: 2026-07-25
+Status: design, awaiting review
+
+## Problem
+
+Lumin is an event recommendation engine. `event` is baked into the Tinybird
+datasources, the D1 schema, every pipe, the vector metadata, and the route
+names. Anyone wanting recommendations over products, articles, videos or
+listings has to pretend their data is an event: `host` means brand, `event_date`
+means release date, `capacity` means nothing at all.
+
+The goal is an engine where a caller brings their own data, describes its shape
+once, and gets recommendations - without a code change or a deploy on our side.
+
+## Decisions
+
+Four decisions were settled before this design:
+
+1. **Pluggable schema per catalog.** Callers register their own field
+   definitions rather than mapping onto a fixed generic schema.
+2. **Runtime registration.** A catalog is created through the API and is usable
+   immediately. No `tinykit generate` + `tb deploy` cycle per customer.
+3. **Multi-tenant, many catalogs per tenant.** A tenant owns N catalogs. An API
+   key resolves to a tenant and can only reach that tenant's catalogs.
+4. **Generic pipes plus facet trends.** `location_trends` generalizes to trend
+   by any declared attribute rather than being dropped or kept as-is.
+
+## Why one datasource and not one per catalog
+
+Tinybird datasources are statically typed and created by deploy. Runtime
+registration therefore cannot mean "a typed datasource per catalog" without
+putting a deploy in the signup path.
+
+So there is exactly one `items__v1`, carrying a **universal core** as real typed
+columns plus an `attributes` JSON string for everything catalog-specific.
+
+The core is deliberately small - the fields nearly every catalog has, and the
+fields the hot paths touch:
+
+```
+tenant_id, catalog_id, item_id, title, description, tags,
+category, image_url, price, created_at, updated_at, attributes
+```
+
+Everything else - `event_date`, `location`, `capacity`, `host`, `brand`,
+`author`, `duration` - lives in `attributes` and is read with `JSONExtract`.
+
+The alternative, putting *everything* in the bag including `title`, was
+rejected: `trending_items` and `item_similarity` read `title` on every row, and
+paying `JSONExtract` there buys no flexibility, since a recommendable item
+without a name is not a thing.
+
+Events stop being special. An event is a catalog whose `attributes` happen to
+contain `event_date` and `location`.
+
+## Data model
+
+**`items__v1`** - sorting key `tenant_id, catalog_id, created_at, item_id`.
+
+**`interactions__v1`** - sorting key `tenant_id, catalog_id, timestamp, user_id,
+item_id`. `event_id` becomes `item_id` throughout.
+
+`tenant_id` leads both sorting keys. This is why the work is not staged into
+"generalize now, multi-tenant later": adding `tenant_id` to a sorting key later
+means rebuilding both datasources and rewriting every pipe's WHERE clause a
+second time.
+
+**Catalog registry (D1)** - `catalogs` and `catalog_fields`. Each catalog
+declares its fields, and critically an **embed config**: which fields concatenate
+into the text input, and which field supplies the image URL. This replaces the
+hardcoded `${title} ${description} ${tags} hosted by ${host}` in
+`processEventIngestion`.
+
+**Vectors** - one Upstash index, namespace per `{tenant_id}:{catalog_id}`.
+Isolation is structural rather than a metadata filter that can be forgotten at
+one call site.
+
+## Pipes
+
+Four generic, all scoped by `tenant_id` + `catalog_id`:
+
+- `trending_items`
+- `realtime_trending`
+- `user_behavior`
+- `item_similarity`
+
+Plus `facet_trends`, which takes an attribute name and trends by its values.
+`location_trends` becomes `facet_trends(attribute='location')`.
+
+## Embedding
+
+Already migrated (commit `f465dcc`): Gemini Embedding 2, 1536-d, multimodal,
+`RETRIEVAL_DOCUMENT` on ingest and `RETRIEVAL_QUERY` on search.
+
+The remaining change is that the text input is assembled from the catalog's
+embed config rather than from fixed event fields, and `image_url` is read from
+the field the catalog nominates.
+
+## Migration
+
+Effectively greenfield. The Tinybird workspace is empty and the Upstash index
+holds 0 vectors, so `events__v1` and the five event pipes are replaced outright
+rather than versioned alongside. There is no backfill and no dual-write window.
+
+## Error handling
+
+Unchanged in shape. Tinybird ingestion failures enqueue compensation and still
+return 201; embedding failures fail the request; image fetch failures degrade to
+a text-only vector. A request naming an unknown catalog, or a catalog belonging
+to another tenant, is a 404 - not a 403, which would confirm the catalog exists.
+
+## Testing
+
+The current route tests are event-shaped but structurally sound - they assert
+orchestration, compensation and cache invalidation, which all survive the
+rename. They get renamed, not rewritten. New coverage needed for: catalog
+registration and validation, tenant isolation (a key for tenant A cannot read
+tenant B's catalog), attributes round-tripping through `JSONExtract`, and
+`facet_trends` over a declared attribute.
+
+## Open question
+
+Per-catalog `attributes` are unindexed. If a customer filters heavily on one
+attribute it will scan. The promotion path - materializing a hot attribute into
+a real column - is deliberately not designed here; it should wait until a real
+workload shows which attributes are hot.
