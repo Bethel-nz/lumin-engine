@@ -9,6 +9,12 @@ import { logInteractionRoute } from './routes/interactions';
 import { getRecommendationsRoute } from './routes/recommendations';
 import { searchRoute } from './routes/search';
 import {
+  createCatalogRoute,
+  getCatalogRoute,
+  listCatalogsRoute,
+} from './routes/catalogs';
+import { requireCatalog, resolveTenant } from './middleware/tenant';
+import {
   scheduledRecommendationUpdate,
   scheduledTagVectorUpdate,
 } from './services/scheduled';
@@ -112,6 +118,16 @@ app.get('/get-recommendations/:userId', requireApiKey, userRateLimiter, getRecom
 app.post('/ingest-event', requireApiKey, ingestEventRoute);
 app.post('/log-interactions', requireApiKey, logInteractionRoute);
 app.get('/search', requireApiKey, searchRoute);
+
+app.post('/api/catalogs', requireApiKey, resolveTenant, createCatalogRoute);
+app.get('/api/catalogs', requireApiKey, resolveTenant, listCatalogsRoute);
+app.get(
+  '/api/catalogs/:catalogId',
+  requireApiKey,
+  resolveTenant,
+  requireCatalog,
+  getCatalogRoute
+);
 
 export default {
   fetch: app.fetch,
