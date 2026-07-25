@@ -7,7 +7,7 @@
       "dependencies": {
         "@better-auth/api-key": "^1.6.18",
         "@upstash/vector": "^1.2.3",
-        "@vyr-e/tinykit": "0.2.1",
+        "@vyr-e/tinykit": "0.3.0",
         "better-auth": "^1.6.18",
         "dotenv": "^17.4.2",
         "drizzle-orm": "0.39.3",
@@ -304,7 +304,7 @@
 
     "@vitest/utils": ["@vitest/utils@3.2.6", "", { "dependencies": { "@vitest/pretty-format": "3.2.6", "loupe": "^3.1.4", "tinyrainbow": "^2.0.0" } }, "sha512-lI23nIs4bnT3T8NIoh+vFaz5s2/DdP0Jgt2jxwgWljvwn82cLJtyi/If+fjFyoLMGIOz0U/fKvWE0d4jsNQEfg=="],
 
-    "@vyr-e/tinykit": ["@vyr-e/tinykit@0.2.1", "", { "dependencies": { "commander": "^14.0.0", "esbuild": "^0.25.0", "prompts": "^2.4.2", "zod": "^3.22.4" }, "peerDependencies": { "typescript": ">=4.5.0" }, "optionalPeers": ["typescript"], "bin": { "tinykit": "dist/cli.js" } }, "sha512-6ouZLNIP90fdTcRULd58ghJ/2rSFOCq89ZmvSaDbg4fTaJ55khsX5pCJPBO63d3Tz5cvf8NbViqo/YnMIiHNdQ=="],
+    "@vyr-e/tinykit": ["@vyr-e/tinykit@0.3.0", "", { "dependencies": { "commander": "^14.0.0", "esbuild": "^0.25.0", "prompts": "^2.4.2", "zod": "^3.22.4" }, "peerDependencies": { "typescript": ">=4.5.0" }, "optionalPeers": ["typescript"], "bin": { "tinykit": "dist/cli.js" } }, "sha512-jQMae0I5ow2+lrbYl6qT6t6tD8kQmi/xIO4f8NMm7G25Gf8n4IUd1+Ii8olCrqPp+AO0b/oxh+p2FD4ymiYRCw=="],
 
     "ansi-regex": ["ansi-regex@6.2.2", "", {}, "sha512-Bq3SmSpyFHaWjPk8If9yc6svM8c56dB5BAtW4Qbw5jHTwwXXcTLoRMkpDJp6VL0XzlWaCHTXrkFURMYmD0sLqg=="],
 
