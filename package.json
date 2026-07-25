@@ -7,13 +7,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "tb:generate": "tinykit generate",
-    "tb:push": "tinykit deploy --force",
+    "tb:generate": "tinykit generate --file src/validation/tinybird-schemas.ts --file src/lib/tinybird-pipes.ts",
+    "tb:push": "tinykit deploy --allow-destructive-operations",
     "tb:deploy": "bun run tb:generate && bun run tb:push"
   },
   "dependencies": {
     "@upstash/vector": "^1.2.0",
-    "@vyr-e/tinykit": "^0.1.0",
+    "@vyr-e/tinykit": "^0.1.2",
     "bcrypt-edge": "^0.1.0",
     "dotenv": "^17.1.0",
     "drizzle-orm": "0.39.3",
