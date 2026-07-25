@@ -55,4 +55,65 @@ describe('createCatalogSchema', () => {
       })
     ).toThrow();
   });
+
+  it('rejects a text_fields entry that does not match the identifier regex', () => {
+    expect(() =>
+      createCatalogSchema.parse({
+        ...valid,
+        embed_config: {
+          text_fields: ["x'); DROP TABLE catalogs;--"],
+          image_field: 'image_url',
+        },
+      })
+    ).toThrow();
+  });
+
+  it('rejects an image_field that does not match the identifier regex', () => {
+    expect(() =>
+      createCatalogSchema.parse({
+        ...valid,
+        embed_config: {
+          text_fields: ['title'],
+          image_field: '$(rm -rf /)',
+        },
+      })
+    ).toThrow();
+  });
+
+  it('rejects a text_fields entry naming a field that is neither core nor declared', () => {
+    expect(() =>
+      createCatalogSchema.parse({
+        ...valid,
+        fields: [{ name: 'brand', type: 'string' }],
+        embed_config: {
+          text_fields: ['nonexistent'],
+          image_field: 'image_url',
+        },
+      })
+    ).toThrow();
+  });
+
+  it('accepts text_fields referencing a declared custom field', () => {
+    const parsed = createCatalogSchema.parse({
+      ...valid,
+      fields: [{ name: 'brand', type: 'string' }],
+      embed_config: {
+        text_fields: ['brand'],
+        image_field: 'image_url',
+      },
+    });
+    expect(parsed.embed_config.text_fields).toContain('brand');
+  });
+
+  it('accepts text_fields referencing only core fields', () => {
+    const parsed = createCatalogSchema.parse({
+      ...valid,
+      fields: [],
+      embed_config: {
+        text_fields: ['title', 'description'],
+        image_field: 'image_url',
+      },
+    });
+    expect(parsed.embed_config.text_fields).toEqual(['title', 'description']);
+  });
 });
