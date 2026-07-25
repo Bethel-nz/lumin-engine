@@ -73,7 +73,9 @@ export const fetchEventVectors = async (
   if (!eventIds || eventIds.length === 0) {
     return {};
   }
-  const vectors = await withRetry(() => vectorIndex.fetch(eventIds));
+  const vectors = await withRetry(() =>
+    vectorIndex.fetch(eventIds, { includeVectors: true })
+  );
   const result: Record<string, Vector | null> = {};
   eventIds.forEach((id, index) => {
     result[id] = vectors[index];
