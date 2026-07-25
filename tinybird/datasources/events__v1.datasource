@@ -5,6 +5,7 @@ SCHEMA >
     `tags` Array(String) `json:$.tags`,
     `host` Nullable(String) `json:$.host`,
     `category` Nullable(String) `json:$.category`,
+    `image_url` Nullable(String) `json:$.image_url`,
     `event_date` Nullable(Int64) `json:$.event_date`,
     `location` Nullable(String) `json:$.location`,
     `capacity` Nullable(Int64) `json:$.capacity`,

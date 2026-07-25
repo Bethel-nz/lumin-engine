@@ -1,5 +1,14 @@
+import { Index } from '@upstash/vector';
 import type { EnvBindings } from '../types';
+import { ingestEventSchema } from '../validation/tinybird-schemas';
+import {
+  createEventIngestionEndpoint,
+  getTinybirdClientFromEnv,
+} from '../lib/tinybird';
 import { createLogger } from './observability';
+import { persistEventToD1, upsertEventVector } from './event-storage';
+import { generateMultimodalEmbedding } from './vector';
+import { createEmbeddingClient } from './embedding';
 
 export interface CompensationAction {
   id: string;
@@ -58,42 +67,68 @@ export class D1CompensationQueue implements CompensationQueue {
   }
 
   async dequeue(): Promise<CompensationAction | null> {
-    const result = await this.db
-      .prepare(`
-        SELECT * FROM compensation_queue
-        WHERE status = 'pending'
-        AND (retry_count < max_retries OR max_retries IS NULL)
-        ORDER BY timestamp ASC
-        LIMIT 1
-      `)
-      .first<{
-        id: string;
-        type: string;
-        description: string;
-        payload: string;
-        timestamp: number;
-        status: string;
-        retry_count: number;
-        max_retries: number;
-      }>();
+    const now = Date.now();
+    const staleClaim = now - 5 * 60 * 1000;
 
-    if (!result) return null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await this.db
+        .prepare(`
+          SELECT * FROM compensation_queue
+          WHERE status = 'pending'
+          AND (retry_count < max_retries OR max_retries IS NULL)
+          AND (claimed_at IS NULL OR claimed_at < ?)
+          ORDER BY timestamp ASC
+          LIMIT 1
+        `)
+        .bind(staleClaim)
+        .first<{
+          id: string;
+          type: string;
+          description: string;
+          payload: string;
+          timestamp: number;
+          status: string;
+          retry_count: number;
+          max_retries: number;
+        }>();
 
-    return {
-      id: result.id,
-      type: result.type as CompensationAction['type'],
-      description: result.description,
-      payload: JSON.parse(result.payload),
-      timestamp: result.timestamp,
-      status: result.status as CompensationAction['status'],
-      retryCount: result.retry_count,
-      maxRetries: result.max_retries,
-    };
+      if (!result) return null;
+
+      const claim = await this.db
+        .prepare(`
+          UPDATE compensation_queue
+          SET claimed_at = ?
+          WHERE id = ?
+          AND status = 'pending'
+          AND (claimed_at IS NULL OR claimed_at < ?)
+        `)
+        .bind(now, result.id, staleClaim)
+        .run();
+
+      if (claim.meta.changes === 0) continue;
+
+      return {
+        id: result.id,
+        type: result.type as CompensationAction['type'],
+        description: result.description,
+        payload: JSON.parse(result.payload),
+        timestamp: result.timestamp,
+        status: result.status as CompensationAction['status'],
+        retryCount: result.retry_count,
+        maxRetries: result.max_retries,
+      };
+    }
+
+    return null;
   }
 
   async markCompleted(actionId: string): Promise<void> {
     await this.db
-      .prepare('UPDATE compensation_queue SET status = ? WHERE id = ?')
+      .prepare(
+        `UPDATE compensation_queue
+         SET status = ?, claimed_at = NULL, error = NULL
+         WHERE id = ?`
+      )
       .bind('completed', actionId)
       .run();
 
@@ -104,10 +139,18 @@ export class D1CompensationQueue implements CompensationQueue {
     await this.db
       .prepare(`
         UPDATE compensation_queue
-        SET status = ?, retry_count = retry_count + 1, error = ?
+        SET
+          retry_count = retry_count + 1,
+          status = CASE
+            WHEN retry_count + 1 >= COALESCE(max_retries, 3)
+              THEN 'failed'
+            ELSE 'pending'
+          END,
+          claimed_at = NULL,
+          error = ?
         WHERE id = ?
       `)
-      .bind('failed', error, actionId)
+      .bind(error, actionId)
       .run();
 
     this.logger.error('Compensation action failed', new Error(error), { actionId });
@@ -183,7 +226,7 @@ export class CompensationProcessor {
       await this.queue.markCompleted(action.id);
       return true;
     } catch (error) {
-      const err = error as Error;
+      const err = error instanceof Error ? error : new Error(String(error));
       await this.queue.markFailed(action.id, err.message);
       return true;
     }
@@ -201,23 +244,37 @@ export class CompensationProcessor {
       operations
     });
 
-    if (operations.includes('vector_store')) {
-      // TODO: Implement vector store deletion
-      this.logger.warn('Vector store rollback not implemented', { eventId });
+    if (
+      operations.includes('vector_store') ||
+      operations.includes('vector_upsert')
+    ) {
+      const vectorIndex = new Index({
+        url: this.env.VECTOR_URL,
+        token: this.env.VECTOR_TOKEN,
+      });
+      await vectorIndex.delete(eventId);
     }
 
-    if (operations.includes('d1_database')) {
-      // TODO: Implement D1 deletion
-      this.logger.warn('D1 database rollback not implemented', { eventId });
+    if (
+      operations.includes('d1_database') ||
+      operations.includes('d1_insert')
+    ) {
+      await this.env.DB
+        .prepare('DELETE FROM events WHERE id = ?')
+        .bind(eventId)
+        .run();
     }
   }
 
   private async executeRetry(action: CompensationAction): Promise<void> {
-    const { eventId, operation, data } = action.payload as {
+    const { eventId, operation, vector } = action.payload as {
       eventId: string;
       operation: string;
-      data: unknown;
+      vector?: number[];
     };
+    const eventData = ingestEventSchema.parse(
+      action.payload.eventData ?? action.payload.data
+    );
 
     this.logger.info('Executing retry', {
       actionId: action.id,
@@ -226,14 +283,56 @@ export class CompensationProcessor {
     });
 
     switch (operation) {
-      case 'tinybird_ingest':
-        // TODO: Re-attempt Tinybird ingestion with provided data
+      case 'embedding_and_vector': {
+        const embeddingClient = createEmbeddingClient(this.env);
+        const embeddingText = [
+          eventData.title,
+          eventData.description ?? '',
+          eventData.tags.join(' '),
+          eventData.host ? `hosted by ${eventData.host}` : '',
+        ].join(' ');
+        const regeneratedVector = await generateMultimodalEmbedding(
+          embeddingText,
+          eventData.image_url,
+          embeddingClient
+        );
+
+        if (regeneratedVector.every((value) => value === 0)) {
+          throw new Error('Embedding regeneration returned an empty vector');
+        }
+
+        const vectorIndex = new Index({
+          url: this.env.VECTOR_URL,
+          token: this.env.VECTOR_TOKEN,
+        });
+        await upsertEventVector(vectorIndex, eventData, regeneratedVector);
+        if (action.payload.writeToD1 === true) {
+          await persistEventToD1(this.env.DB, eventData);
+        }
         break;
-      case 'vector_upsert':
-        // TODO: Re-attempt vector upsert with provided data
+      }
+      case 'tinybird_ingest': {
+        const tinybird = getTinybirdClientFromEnv(this.env);
+        const ingestEvent = createEventIngestionEndpoint(tinybird);
+        await ingestEvent(eventData);
         break;
+      }
+      case 'vector_upsert': {
+        if (!vector || vector.length === 0) {
+          throw new Error('Missing vector for vector_upsert compensation');
+        }
+        const vectorIndex = new Index({
+          url: this.env.VECTOR_URL,
+          token: this.env.VECTOR_TOKEN,
+        });
+        await upsertEventVector(vectorIndex, eventData, vector);
+        if (action.payload.writeToD1 === true) {
+          await persistEventToD1(this.env.DB, eventData);
+        }
+        break;
+      }
       case 'd1_insert':
-        // TODO: Re-attempt D1 insert with provided data
+        await persistEventToD1(this.env.DB, eventData);
         break;
       default:
         throw new Error(`Unknown retry operation: ${operation}`);
@@ -263,19 +362,25 @@ export class CompensationProcessor {
     }
   }
 
-  async startProcessingLoop(intervalMs = 30000): Promise<void> {
-    const processLoop = async (): Promise<void> => {
-      try {
-        let processed = false;
-        do {
-          processed = await this.processNext();
-        } while (processed);
-      } catch (error) {
-        this.logger.error('Error in compensation processing loop', error as Error);
-      }
-    };
+  async processBatch(limit = 25): Promise<number> {
+    let processedCount = 0;
 
-    setInterval(processLoop, intervalMs);
-    this.logger.info('Compensation processing loop started', { intervalMs });
+    while (processedCount < limit) {
+      const processed = await this.processNext();
+      if (!processed) break;
+      processedCount++;
+    }
+
+    this.logger.info('Compensation batch processed', { processedCount, limit });
+    return processedCount;
   }
 }
+
+export const processCompensationQueue = async (
+  env: EnvBindings,
+  limit = 25
+): Promise<number> => {
+  const queue = new D1CompensationQueue(env.DB, env);
+  const processor = new CompensationProcessor(queue, env);
+  return processor.processBatch(limit);
+};

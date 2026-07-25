@@ -9,8 +9,14 @@ export const CONFIG = {
   },
 
   EMBEDDING: {
-    MODEL: 'text-embedding-3-small',
+    MODEL: 'gemini-embedding-2',
     DIMENSIONS: 1536,
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta',
+    IMAGE: {
+      MAX_BYTES: 4 * 1024 * 1024,
+      TIMEOUT_MS: 5000,
+      ALLOWED_MIME: ['image/jpeg', 'image/png', 'image/webp'],
+    },
   },
 
   CACHE_TTL: {

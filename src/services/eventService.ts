@@ -1,14 +1,13 @@
 import type { Context } from 'hono';
-import { drizzle } from 'drizzle-orm/d1';
 import type { EnvBindings } from '../types';
 import type { IngestEvent } from '../validation/tinybird-schemas';
-import * as schema from '../db/schema';
-import { getOpenAIClient, getVectorIndex } from '../lib/clients';
+import { getEmbeddingClient, getVectorIndex } from '../lib/clients';
 import { getTinybirdClient, createEventIngestionEndpoint } from '../lib/tinybird';
-import { generateEmbedding } from './vector';
+import { generateMultimodalEmbedding } from './vector';
 import { withRetry } from '../utils';
 import { createLogger, createMetricsCollector, withTiming } from './observability';
 import { D1CompensationQueue, type CompensationAction } from './compensation';
+import { persistEventToD1, upsertEventVector } from './event-storage';
 
 interface IngestionOptions {
   writeToD1: boolean;
@@ -29,7 +28,7 @@ export const processEventIngestion = async (
   const logger = createLogger(c.env);
   const metrics = createMetricsCollector(c.env);
   const requestId = crypto.randomUUID();
-  const eventId = crypto.randomUUID();
+  const eventId = eventData.id;
 
   logger.info('Starting event ingestion', {
     requestId,
@@ -43,78 +42,106 @@ export const processEventIngestion = async (
 
   try {
     const vectorIndex = getVectorIndex(c);
-    const openai = getOpenAIClient(c);
+    const embeddingClient = getEmbeddingClient(c);
     const tb = getTinybirdClient(c);
     const ingestEvent = createEventIngestionEndpoint(tb);
-    const db = drizzle(c.env.DB, { schema });
     const compensationQueue = new D1CompensationQueue(c.env.DB, c.env);
 
     const embeddingText = `${eventData.title} ${eventData.description || ''} ${eventData.tags.join(' ')} ${eventData.host ? `hosted by ${eventData.host}` : ''}`;
 
     let vector: number[];
-    let tbResult: unknown;
-    let completedOperations: string[] = [];
+    const completedOperations: string[] = [];
 
-    try {
-      [vector, tbResult] = await Promise.all([
-        withTiming(
-          'embedding_generation',
-          () => generateEmbedding(embeddingText, openai),
-          metrics,
-          { eventId }
-        ),
-        withTiming(
-          'tinybird_ingestion',
-          () => withRetry(() => ingestEvent({
-            ...eventData,
-            created_at: Date.now(),
-            updated_at: Date.now(),
-          })),
-          metrics,
-          { eventId }
-        )
-      ]);
+    const [embeddingOutcome, tinybirdOutcome] = await Promise.allSettled([
+      withTiming(
+        'embedding_generation',
+        () =>
+          generateMultimodalEmbedding(
+            embeddingText,
+            eventData.image_url,
+            embeddingClient
+          ),
+        metrics,
+        { eventId }
+      ),
+      withTiming(
+        'tinybird_ingestion',
+        () => withRetry(() => ingestEvent(eventData)),
+        metrics,
+        { eventId }
+      ),
+    ]);
 
-      completedOperations.push('tinybird_ingest', 'embedding_generation');
-      tinybirdResult = tbResult;
-
-      if (vector.every((v) => v === 0)) {
-        throw new Error('Failed to generate a valid embedding for the event.');
-      }
-    } catch (error) {
+    if (tinybirdOutcome.status === 'fulfilled') {
+      tinybirdResult = tinybirdOutcome.value;
+      completedOperations.push('tinybird_ingest');
+    } else {
       const compensationAction: CompensationAction = {
         id: crypto.randomUUID(),
-        type: 'manual_intervention',
-        description: `Failed initial operations for event ${eventId}`,
+        type: 'retry',
+        description: `Retry Tinybird ingestion for event ${eventId}`,
         payload: {
           eventId,
+          operation: 'tinybird_ingest',
           eventData,
-          error: (error as Error).message,
-          completedOperations
         },
         timestamp: Date.now(),
-        status: 'pending'
+        status: 'pending',
+        maxRetries: 5,
       };
       await compensationQueue.enqueue(compensationAction);
-      throw error;
+      errors.push('Tinybird ingestion queued for retry');
+    }
+
+    if (embeddingOutcome.status === 'rejected') {
+      const embeddingError =
+        embeddingOutcome.reason instanceof Error
+          ? embeddingOutcome.reason
+          : new Error(String(embeddingOutcome.reason));
+      const compensationAction: CompensationAction = {
+        id: crypto.randomUUID(),
+        type: 'retry',
+        description: `Retry embedding and persistence for event ${eventId}`,
+        payload: {
+          eventId,
+          operation: 'embedding_and_vector',
+          eventData,
+          writeToD1: options.writeToD1,
+          error: embeddingError.message,
+        },
+        timestamp: Date.now(),
+        status: 'pending',
+        maxRetries: 5,
+      };
+      await compensationQueue.enqueue(compensationAction);
+      throw embeddingError;
+    }
+
+    vector = embeddingOutcome.value;
+    completedOperations.push('embedding_generation');
+
+    if (vector.every((v) => v === 0)) {
+      await compensationQueue.enqueue({
+        id: crypto.randomUUID(),
+        type: 'retry',
+        description: `Retry embedding and persistence for event ${eventId}`,
+        payload: {
+          eventId,
+          operation: 'embedding_and_vector',
+          eventData,
+          writeToD1: options.writeToD1,
+        },
+        timestamp: Date.now(),
+        status: 'pending',
+        maxRetries: 5,
+      });
+      throw new Error('Failed to generate a valid embedding for the event.');
     }
 
     try {
       await withTiming(
         'vector_upsert',
-        () => vectorIndex.upsert([
-          {
-            id: eventId,
-            vector,
-            metadata: {
-              title: eventData.title,
-              tags: eventData.tags,
-              host: eventData.host ?? '',
-              category: eventData.category ?? '',
-              location: eventData.location ?? ''
-            }
-          },
-        ]),
+        () => upsertEventVector(vectorIndex, eventData, vector),
         metrics,
         { eventId }
       );
@@ -124,15 +151,7 @@ export const processEventIngestion = async (
       if (options.writeToD1) {
         await withTiming(
           'd1_insert',
-          () => db.insert(schema.events).values({
-            id: eventId,
-            metadata: {
-              title: eventData.title,
-              host: eventData.host,
-              category: eventData.category,
-              location: eventData.location
-            }
-          }),
+          () => persistEventToD1(c.env.DB, eventData),
           metrics,
           { eventId }
         );
@@ -147,7 +166,7 @@ export const processEventIngestion = async (
 
       logger.info('Event ingestion completed successfully', {
         requestId,
-        eventId: eventData.id,
+        eventId,
         writeToD1: options.writeToD1,
         completedOperations
       });
@@ -157,29 +176,28 @@ export const processEventIngestion = async (
 
       const compensationAction: CompensationAction = {
         id: crypto.randomUUID(),
-        type: 'rollback',
-        description: `Partial failure in event ingestion for ${eventData.id}`,
+        type: 'retry',
+        description: `Retry ${failedOperation} for event ${eventId}`,
         payload: {
           eventId,
-          operations: completedOperations,
-          failedOperation,
+          operation: failedOperation,
           eventData,
           vector,
-          tinybirdResult
+          writeToD1: options.writeToD1,
         },
         timestamp: Date.now(),
         status: 'pending',
-        maxRetries: 3
+        maxRetries: 5,
       };
 
       await compensationQueue.enqueue(compensationAction);
-      errors.push(`Partial failure: ${failedOperation} failed, compensation queued`);
+      errors.push(`${failedOperation} failed and was queued for retry`);
 
       throw error;
     }
 
   } catch (error: unknown) {
-    const err = error as Error;
+    const err = error instanceof Error ? error : new Error(String(error));
     errors.push(err.message);
 
     metrics.recordCounter('event_ingestion_error', 1, {
@@ -202,7 +220,7 @@ export const processEventIngestion = async (
       });
     }
 
-    throw error;
+    throw err;
   }
 
   return {

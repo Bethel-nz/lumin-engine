@@ -1,12 +1,12 @@
 import { Index } from '@upstash/vector';
 import type { Context } from 'hono';
-import OpenAI from 'openai';
 import type { EnvBindings } from '../types';
+import { createEmbeddingClient, type EmbeddingClient } from '../services/embedding';
 
-export const getOpenAIClient = (
+export const getEmbeddingClient = (
   c: Context<{ Bindings: EnvBindings }>
-): OpenAI => {
-  return new OpenAI({ apiKey: c.env.OPENAI_API_KEY });
+): EmbeddingClient => {
+  return createEmbeddingClient(c.env);
 };
 
 export const getVectorIndex = (

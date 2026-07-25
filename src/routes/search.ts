@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { getOpenAIClient, getVectorIndex } from '../lib/clients';
+import { getEmbeddingClient, getVectorIndex } from '../lib/clients';
 import { generateEmbedding } from '../services/vector';
 import type { EnvBindings, VectorMetadata } from '../types';
 import { handleError, withRetry } from '../utils';
@@ -12,9 +12,13 @@ export const searchRoute = async (c: Context<{ Bindings: EnvBindings }>) => {
 
   try {
     const vectorIndex = getVectorIndex(c);
-    const openai = getOpenAIClient(c);
+    const embeddingClient = getEmbeddingClient(c);
 
-    const queryVector = await generateEmbedding(query, openai);
+    const queryVector = await generateEmbedding(
+      query,
+      embeddingClient,
+      'RETRIEVAL_QUERY'
+    );
     if (queryVector.every((v) => v === 0)) {
       return handleError(c, null, 'Failed to perform search', 400);
     }

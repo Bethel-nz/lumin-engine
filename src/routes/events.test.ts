@@ -52,7 +52,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
   const mockVectorIndex = {
     upsert: vi.fn().mockResolvedValue({ success: true }),
   };
-  const mockOpenAI = {} as any;
+  const mockEmbeddingClient = {} as any;
   const mockTinybirdClient = {} as any;
   const mockIngestEndpoint = vi.fn().mockResolvedValue({
     successful_rows: 1,
@@ -82,13 +82,13 @@ describe('ingestEventRoute - TinyBird Integration', () => {
 
     // Setup successful mock responses for all external services
     vi.mocked(clients.getVectorIndex).mockReturnValue(mockVectorIndex);
-    vi.mocked(clients.getOpenAIClient).mockReturnValue(mockOpenAI);
+    vi.mocked(clients.getEmbeddingClient).mockReturnValue(mockEmbeddingClient);
     vi.mocked(tinybird.getTinybirdClient).mockReturnValue(mockTinybirdClient);
     vi.mocked(tinybird.createEventIngestionEndpoint).mockReturnValue(mockIngestEndpoint);
     vi.mocked(drizzle).mockReturnValue(mockDB);
 
     // Default mock for generateEmbedding - can be overridden in individual tests
-    vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
   });
 
   /**
@@ -119,7 +119,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue(mockVector);
     mockIngestEndpoint.mockResolvedValue(mockTinybirdResponse);
 
     await ingestEventRoute(mockContext);
@@ -131,9 +131,10 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     });
 
     // Verify embedding generation uses all available text for better semantic understanding
-    expect(vector.generateEmbedding).toHaveBeenCalledWith(
+    expect(vector.generateMultimodalEmbedding).toHaveBeenCalledWith(
       'AI Conference 2025 Latest advances in AI ai technology conference hosted by TechCorp',
-      mockOpenAI
+      undefined,
+      mockEmbeddingClient
     );
 
     // Verify D1 reference storage for transactional queries. persistEventToD1
@@ -152,6 +153,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
           tags: ['ai', 'technology', 'conference'],
           host: 'TechCorp',
           category: 'technology',
+          image_url: '',
           location: 'San Francisco',
         },
       },
@@ -182,7 +184,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     const mockVector = [0.4, 0.5, 0.6];
     
     vi.mocked(mockContext.req.json).mockResolvedValue(minimalEventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue(mockVector);
 
     await ingestEventRoute(mockContext);
 
@@ -201,6 +203,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
           tags: ['basic'],
           host: '',
           category: '',
+          image_url: '',
           location: '',
         },
       },
@@ -223,7 +226,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     const zeroVector = [0, 0, 0]; // Indicates embedding service failure
     
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue(zeroVector);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue(zeroVector);
 
     await ingestEventRoute(mockContext);
 
@@ -251,7 +254,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockIngestEndpoint.mockRejectedValue(new Error('TinyBird API Timeout'));
 
     await ingestEventRoute(mockContext);
@@ -283,7 +286,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockVectorIndex.upsert.mockRejectedValue(new Error('Vector store unavailable'));
 
     await ingestEventRoute(mockContext);
@@ -323,7 +326,7 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     // Should not make any external service calls if validation fails
     expect(mockIngestEndpoint).not.toHaveBeenCalled();
     expect(mockVectorIndex.upsert).not.toHaveBeenCalled();
-    expect(vector.generateEmbedding).not.toHaveBeenCalled();
+    expect(vector.generateMultimodalEmbedding).not.toHaveBeenCalled();
   });
 
   /**
@@ -342,13 +345,13 @@ describe('ingestEventRoute - TinyBird Integration', () => {
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
     
     // Set up mocks to track calls
-    const embeddingMock = vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
+    const embeddingMock = vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     const tinybirdMock = mockIngestEndpoint.mockResolvedValue({ successful_rows: 1, quarantined_rows: 0 });
 
     await ingestEventRoute(mockContext);
 
     // Verify both operations were called (indicating parallel execution worked)
-    expect(embeddingMock).toHaveBeenCalledWith(expect.stringContaining('Parallel Test'), mockOpenAI);
+    expect(embeddingMock).toHaveBeenCalledWith(expect.stringContaining('Parallel Test'), undefined, mockEmbeddingClient);
     expect(tinybirdMock).toHaveBeenCalledWith(expect.objectContaining({
       id: 'event-parallel',
       title: 'Parallel Test',

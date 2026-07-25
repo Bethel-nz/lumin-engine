@@ -1,5 +1,5 @@
 import type { Index } from '@upstash/vector';
-import type OpenAI from 'openai';
+import type { EmbeddingClient } from './embedding';
 import { CONFIG } from '../config';
 import type { EnvBindings } from '../types';
 import {
@@ -43,7 +43,7 @@ export const getCollaborativeVector = async (
 export const computeHybridUserVector = async (
   userId: string,
   env: EnvBindings,
-  openai: OpenAI,
+  embeddingClient: EmbeddingClient,
   vectorIndex: Index
 ): Promise<number[]> => {
   try {
@@ -68,11 +68,11 @@ export const computeHybridUserVector = async (
     ] = await Promise.all([
       buildInteractionVector(interactions, vectorIndex),
       selectedTags.length
-        ? generateEmbedding(selectedTags.join(' '), openai)
+        ? generateEmbedding(selectedTags.join(' '), embeddingClient)
         : Promise.resolve(new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0)),
       getCollaborativeVector(userId, env, vectorIndex),
       demographicsText
-        ? generateEmbedding(demographicsText, openai)
+        ? generateEmbedding(demographicsText, embeddingClient)
         : Promise.resolve(new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0)),
     ]);
 

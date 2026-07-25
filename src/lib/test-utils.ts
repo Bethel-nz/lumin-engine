@@ -31,21 +31,10 @@ vi.mock('@upstash/vector', () => {
   };
 });
 
-// Mock OpenAI
-vi.mock('openai', () => {
-  const mockOpenAI = {
-    embeddings: {
-      create: vi.fn().mockResolvedValue({
-        data: [
-          { embedding: new Array(1536).fill(0).map(() => Math.random()) },
-        ],
-      }),
-    },
-  };
-  return {
-    __esModule: true,
-    default: vi.fn(() => mockOpenAI),
-  };
+export const createEmbeddingClientMock = () => ({
+  embed: vi
+    .fn()
+    .mockResolvedValue(new Array(1536).fill(0).map(() => Math.random())),
 });
 
 // Mock Drizzle ORM for D1

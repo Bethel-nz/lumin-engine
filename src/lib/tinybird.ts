@@ -1,6 +1,5 @@
 import { Tinybird, defineIngest } from '@vyr-e/tinykit';
 import type { Context } from 'hono';
-import { nanoid } from 'nanoid';
 import type { EnvBindings } from '../types';
 import { z } from 'zod';
 
@@ -13,8 +12,18 @@ import {
   logInteractionSchema,
   trendingEventsQuerySchema,
   trendingEventResponseSchema,
+  realtimeTrendingQuerySchema,
+  realtimeTrendingResponseSchema,
+  userBehaviorQuerySchema,
+  userBehaviorResponseSchema,
+  locationTrendsQuerySchema,
+  locationTrendResponseSchema,
   eventSimilarityQuerySchema,
   eventSimilarityResponseSchema,
+} from '../validation/tinybird-schemas';
+import type {
+  IngestEvent,
+  LogInteraction,
 } from '../validation/tinybird-schemas';
 
 import {
@@ -47,9 +56,15 @@ export type LuminTinybirdClient = Tinybird<
 export const getTinybirdClient = (
   c: Context<{ Bindings: EnvBindings }>
 ): LuminTinybirdClient => {
+  return getTinybirdClientFromEnv(c.env);
+};
+
+export const getTinybirdClientFromEnv = (
+  env: EnvBindings
+): LuminTinybirdClient => {
   return new Tinybird({
-    baseUrl: c.env.TINYBIRD_BASE_URL,
-    token: c.env.TINYBIRD_TOKEN,
+    baseUrl: env.TINYBIRD_BASE_URL,
+    token: env.TINYBIRD_TOKEN,
     ...luminClientConfig,
   });
 };
@@ -61,12 +76,11 @@ const eventIngestDef = defineIngest({
 
 export const createEventIngestionEndpoint = (tb: LuminTinybirdClient) => {
   const ingest = tb.ingest(eventIngestDef);
-  return async (c: Context) => {
-    const body = await c.req.json();
-    const validatedData = ingestEventSchema.parse(body);
+  return async (eventData: IngestEvent) => {
+    const validatedData = ingestEventSchema.parse(eventData);
 
     const completeData = {
-      id: nanoid(),
+      id: validatedData.id,
       created_at: Date.now(),
       updated_at: Date.now(),
       title: validatedData.title,
@@ -74,6 +88,7 @@ export const createEventIngestionEndpoint = (tb: LuminTinybirdClient) => {
       description: validatedData.description ?? null,
       host: validatedData.host ?? null,
       category: validatedData.category ?? null,
+      image_url: validatedData.image_url ?? null,
       event_date: validatedData.event_date ?? null,
       location: validatedData.location ?? null,
       capacity: validatedData.capacity ?? null,
@@ -82,8 +97,7 @@ export const createEventIngestionEndpoint = (tb: LuminTinybirdClient) => {
         ? JSON.stringify(validatedData.metadata)
         : null,
     };
-    const result = await ingest([completeData]);
-    return c.json(result);
+    return ingest([completeData]);
   };
 };
 
@@ -94,12 +108,11 @@ const interactionIngestDef = defineIngest({
 
 export const createInteractionIngestionEndpoint = (tb: LuminTinybirdClient) => {
   const ingest = tb.ingest(interactionIngestDef);
-  return async (c: Context) => {
-    const body = await c.req.json();
-    const validatedData = logInteractionSchema.parse(body);
+  return async (interactionData: LogInteraction) => {
+    const validatedData = logInteractionSchema.parse(interactionData);
 
     const completeData = {
-      id: nanoid(),
+      id: validatedData.id,
       timestamp: Date.now(),
       user_id: validatedData.user_id,
       event_id: validatedData.event_id,
@@ -113,8 +126,7 @@ export const createInteractionIngestionEndpoint = (tb: LuminTinybirdClient) => {
         : null,
     };
 
-    const result = await ingest([completeData]);
-    return c.json(result);
+    return ingest([completeData]);
   };
 };
 
@@ -144,13 +156,10 @@ export const createEventSimilarityQuery = (tb: LuminTinybirdClient) => {
 export const createUserBehaviorQuery = (tb: LuminTinybirdClient) => {
   const queryPipe = tb.pipe({
     pipe: 'user_behavior__v1',
-    data: trendingEventResponseSchema,
+    data: userBehaviorResponseSchema,
   });
-  return async (params: { limit: number; days: number; hours?: number }) => {
-    const validatedParams = trendingEventsQuerySchema.parse({
-      limit: params.limit,
-      days: params.days,
-    });
+  return async (params: z.infer<typeof userBehaviorQuerySchema>) => {
+    const validatedParams = userBehaviorQuerySchema.parse(params);
     return await queryPipe(validatedParams);
   };
 };
@@ -158,10 +167,10 @@ export const createUserBehaviorQuery = (tb: LuminTinybirdClient) => {
 export const createRealtimeTrendingQuery = (tb: LuminTinybirdClient) => {
   const queryPipe = tb.pipe({
     pipe: 'realtime_trending__v1',
-    data: trendingEventResponseSchema,
+    data: realtimeTrendingResponseSchema,
   });
-  return async (params: { limit: number; days: number }) => {
-    const validatedParams = trendingEventsQuerySchema.parse(params);
+  return async (params: z.infer<typeof realtimeTrendingQuerySchema>) => {
+    const validatedParams = realtimeTrendingQuerySchema.parse(params);
     return await queryPipe(validatedParams);
   };
 };
@@ -169,13 +178,10 @@ export const createRealtimeTrendingQuery = (tb: LuminTinybirdClient) => {
 export const createLocationTrendsQuery = (tb: LuminTinybirdClient) => {
   const queryPipe = tb.pipe({
     pipe: 'location_trends__v1',
-    data: trendingEventResponseSchema,
+    data: locationTrendResponseSchema,
   });
-  return async (params: { limit: number; days: number; category?: string }) => {
-    const validatedParams = trendingEventsQuerySchema.parse({
-      limit: params.limit,
-      days: params.days,
-    });
+  return async (params: z.infer<typeof locationTrendsQuerySchema>) => {
+    const validatedParams = locationTrendsQuerySchema.parse(params);
     return await queryPipe(validatedParams);
   };
 };

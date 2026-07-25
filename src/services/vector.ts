@@ -1,27 +1,68 @@
 import type { Index, Vector } from '@upstash/vector';
-import type OpenAI from 'openai';
 import { CONFIG } from '../config';
 import type { InteractionResult } from '../types';
 import { captureWorkerError, withRetry } from '../utils';
+import {
+  fetchImagePart,
+  type EmbeddingClient,
+  type EmbeddingPart,
+  type EmbeddingTask,
+} from './embedding';
+
+const zeroVector = () => new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
 
 export const generateEmbedding = async (
   text: string,
-  openai: OpenAI
+  client: EmbeddingClient,
+  taskType: EmbeddingTask = 'RETRIEVAL_DOCUMENT'
 ): Promise<number[]> => {
   if (!text?.trim()) {
-    return new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
+    return zeroVector();
   }
   try {
-    const { data } = await withRetry(() =>
-      openai.embeddings.create({
-        model: CONFIG.EMBEDDING.MODEL,
-        input: text.trim(),
-      })
+    return await withRetry(() =>
+      client.embed([{ text: text.trim() }], taskType)
     );
-    return data[0]?.embedding ?? new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
   } catch (error) {
     captureWorkerError(error as Error, { context: 'generateEmbedding', text });
-    return new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);
+    return zeroVector();
+  }
+};
+
+export const generateMultimodalEmbedding = async (
+  text: string,
+  imageUrl: string | undefined | null,
+  client: EmbeddingClient,
+  taskType: EmbeddingTask = 'RETRIEVAL_DOCUMENT'
+): Promise<number[]> => {
+  const trimmed = text?.trim() ?? '';
+
+  if (!imageUrl) {
+    return generateEmbedding(trimmed, client, taskType);
+  }
+
+  try {
+    const imagePart = await fetchImagePart(imageUrl);
+
+    if (!imagePart) {
+      captureWorkerError(new Error('Image unavailable for embedding'), {
+        context: 'generateMultimodalEmbedding',
+        imageUrl,
+      });
+      return generateEmbedding(trimmed, client, taskType);
+    }
+
+    const parts: EmbeddingPart[] = trimmed
+      ? [{ text: trimmed }, imagePart]
+      : [imagePart];
+
+    return await withRetry(() => client.embed(parts, taskType));
+  } catch (error) {
+    captureWorkerError(error as Error, {
+      context: 'generateMultimodalEmbedding',
+      imageUrl,
+    });
+    return generateEmbedding(trimmed, client, taskType);
   }
 };
 
