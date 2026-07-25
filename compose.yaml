@@ -1,0 +1,14 @@
+services:
+  tinybird:
+    image: tinybirdco/tinybird-local:latest
+    platform: linux/amd64
+    ports:
+      - "7181:7181"
+    volumes:
+      - tinybird-clickhouse:/var/lib/clickhouse
+      - tinybird-metadata:/redis-data
+    restart: unless-stopped
+
+volumes:
+  tinybird-clickhouse:
+  tinybird-metadata:

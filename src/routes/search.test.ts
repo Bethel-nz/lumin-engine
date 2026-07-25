@@ -41,14 +41,14 @@ describe('searchRoute - Semantic Vector Search', () => {
   const mockVectorIndex = {
     query: vi.fn(),
   };
-  const mockOpenAI = {} as any;
+  const mockEmbeddingClient = {} as any;
 
   beforeEach(() => {
     vi.clearAllMocks();
     
     // Setup successful default responses
     vi.mocked(clients.getVectorIndex).mockReturnValue(mockVectorIndex);
-    vi.mocked(clients.getOpenAIClient).mockReturnValue(mockOpenAI);
+    vi.mocked(clients.getEmbeddingClient).mockReturnValue(mockEmbeddingClient);
   });
 
   /**
@@ -108,7 +108,7 @@ describe('searchRoute - Semantic Vector Search', () => {
     await searchRoute(mockContext);
 
     // Verify embedding generation with user query
-    expect(vectorService.generateEmbedding).toHaveBeenCalledWith(searchQuery, mockOpenAI);
+    expect(vectorService.generateEmbedding).toHaveBeenCalledWith(searchQuery, mockEmbeddingClient, 'RETRIEVAL_QUERY');
 
     // Verify vector search with generated embedding
     expect(mockVectorIndex.query).toHaveBeenCalledWith({
@@ -401,7 +401,7 @@ describe('searchRoute - Semantic Vector Search', () => {
     await searchRoute(mockContext);
 
     // Should successfully process complex queries
-    expect(vectorService.generateEmbedding).toHaveBeenCalledWith(complexQuery, mockOpenAI);
+    expect(vectorService.generateEmbedding).toHaveBeenCalledWith(complexQuery, mockEmbeddingClient, 'RETRIEVAL_QUERY');
     expect(mockVectorIndex.query).toHaveBeenCalled();
   });
 
@@ -417,7 +417,7 @@ describe('searchRoute - Semantic Vector Search', () => {
     await searchRoute(mockContext);
 
     // Should handle special characters without breaking
-    expect(vectorService.generateEmbedding).toHaveBeenCalledWith(specialCharQuery, mockOpenAI);
+    expect(vectorService.generateEmbedding).toHaveBeenCalledWith(specialCharQuery, mockEmbeddingClient, 'RETRIEVAL_QUERY');
     expect(utils.handleError).not.toHaveBeenCalled();
   });
 });

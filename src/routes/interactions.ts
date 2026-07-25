@@ -1,42 +1,34 @@
 import type { Context } from 'hono';
-import { checkUserExists, insertInteraction } from '../services/database';
+import { insertInteraction, upsertUserProfile } from '../services/database';
 import { getTinybirdClient, createInteractionIngestionEndpoint } from '../lib/tinybird';
 import type { EnvBindings } from '../types';
-import { handleError, validateInput, withRetry } from '../utils';
+import { handleError, withRetry } from '../utils';
 import { logInteractionSchema } from '../validation/tinybird-schemas';
-
-
 
 export const logInteractionRoute = async (
   c: Context<{ Bindings: EnvBindings }>
 ) => {
   try {
     const body = await c.req.json();
-    const interactionData = validateInput(body, logInteractionSchema);
-    const { user_id, event_id, action, tags } = interactionData;
+    const interactionData = logInteractionSchema.parse(body);
+    const { id, user_id, event_id, action, tags } = interactionData;
 
     const tb = getTinybirdClient(c);
     const ingestInteraction = createInteractionIngestionEndpoint(tb);
 
-    const userExists = await checkUserExists(c.env.DB, user_id);
-    if (!userExists) {
+    await upsertUserProfile(c.env.DB, user_id);
+
+    if (action !== 'select_tags' && action !== 'signup') {
       await insertInteraction(c.env.DB, {
+        id,
         user_id,
-        event_id: 'initial_signup',
-        action: 'signup',
+        event_id,
+        action,
         timestamp: Date.now(),
       });
     }
 
-    const mockContext = {
-      req: {
-        json: () => Promise.resolve(interactionData),
-      },
-      json: (data: any) => ({ json: data }),
-      env: c.env,
-    } as Context;
-
-    await withRetry(() => ingestInteraction(mockContext));
+    await withRetry(() => ingestInteraction(interactionData));
 
     if (action === 'select_tags' && tags) {
       await c.env.CACHE.put(`user_tags:${user_id}`, JSON.stringify(tags), {
@@ -48,7 +40,11 @@ export const logInteractionRoute = async (
     await c.env.CACHE.delete(`recs_hash:${user_id}`);
 
     return c.json(
-      { success: true, message: `Interaction logged for user ${user_id}` },
+      {
+        success: true,
+        interaction_id: id,
+        message: `Interaction logged for user ${user_id}`,
+      },
       201
     );
   } catch (e: unknown) {

@@ -1,28 +1,45 @@
 import { CONFIG } from '../config';
 import type { Interaction, InteractionResult } from '../types';
 
-export const checkUserExists = async (
+export const upsertUserProfile = async (
   db: D1Database,
   userId: string
-): Promise<boolean> => {
-  const result = await db
-    .prepare('SELECT 1 FROM interactions WHERE user_id = ? LIMIT 1')
-    .bind(userId)
-    .first();
-  return !!result;
+): Promise<void> => {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO user_profiles
+       (user_id, created_at, updated_at, last_active_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         updated_at = excluded.updated_at,
+         last_active_at = excluded.last_active_at`
+    )
+    .bind(userId, now, now, now)
+    .run();
 };
 
 export const insertInteraction = async (
   db: D1Database,
-  data: Omit<Interaction, 'weight'>
+  data: Omit<Interaction, 'weight'> & { id: string }
 ): Promise<void> => {
   const weight =
     CONFIG.ACTION_WEIGHTS[data.action as keyof typeof CONFIG.ACTION_WEIGHTS] ?? 0;
   await db
     .prepare(
-      'INSERT INTO interactions (user_id, event_id, action, weight, timestamp) VALUES (?, ?, ?, ?, ?)'
+      `INSERT INTO interactions
+       (id, user_id, event_id, action, weight, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO NOTHING`
     )
-    .bind(data.user_id, data.event_id, data.action, weight, data.timestamp)
+    .bind(
+      data.id,
+      data.user_id,
+      data.event_id,
+      data.action,
+      weight,
+      new Date(data.timestamp).toISOString()
+    )
     .run();
 };
 
@@ -32,7 +49,9 @@ export const getUserInteractions = async (
 ): Promise<Omit<InteractionResult, 'total_weight' | 'latest'>[]> => {
   const result = await db
     .prepare(
-      'SELECT event_id, action FROM interactions WHERE user_id = ? AND action != ?'
+      `SELECT event_id, action, weight, timestamp
+       FROM interactions
+       WHERE user_id = ? AND action != ?`
     )
     .bind(userId, 'signup')
     .all<Omit<InteractionResult, 'total_weight' | 'latest'>>();
@@ -62,7 +81,10 @@ export const getRecentEngagementRate = async (
        FROM interactions 
        WHERE user_id = ? AND timestamp > ?`
     )
-    .bind(userId, Date.now() - 7 * 24 * 60 * 60 * 1000)
+    .bind(
+      userId,
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    )
     .first<{ rate: number }>();
 
   return result?.rate || 0;
@@ -141,10 +163,11 @@ export const getSimilarUserInteractions = async (
   const placeholders = userIds.map(() => '?').join(',');
   const result = await db
     .prepare(
-      `SELECT event_id, action FROM interactions
-      WHERE user_id IN (${placeholders}) AND action IN ('like', 'click')
-      ORDER BY timestamp DESC
-      LIMIT 30`
+      `SELECT event_id, action, weight, timestamp
+       FROM interactions
+       WHERE user_id IN (${placeholders}) AND action IN ('like', 'click')
+       ORDER BY timestamp DESC
+       LIMIT 30`
     )
     .bind(...userIds)
     .all<Omit<InteractionResult, 'total_weight' | 'latest'>>();

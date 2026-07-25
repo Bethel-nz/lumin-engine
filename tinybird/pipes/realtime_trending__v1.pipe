@@ -1,0 +1,30 @@
+NODE endpoint
+SQL >
+    %
+    SELECT
+          event_id,
+          count() / greatest({{ Int64(minutes, 60) }}, 1) AS interaction_velocity,
+          sum(
+            multiIf(
+              action = 'like', 2.0,
+              action = 'click', 1.0,
+              action = 'view', 0.5,
+              action = 'dislike', -1.0,
+              0.0
+            )
+          ) AS engagement_score
+        FROM
+        (
+          SELECT id, any(event_id) AS event_id, any(action) AS action,
+                 max(timestamp) AS timestamp
+          FROM interactions__v1
+          GROUP BY id
+        )
+        WHERE timestamp >= toUnixTimestamp64Milli(
+          now64(3) - INTERVAL {{ Int64(minutes, 60) }} MINUTE
+        )
+        GROUP BY event_id
+        ORDER BY engagement_score DESC, interaction_velocity DESC
+        LIMIT {{ Int64(limit, 10) }}
+
+TYPE endpoint

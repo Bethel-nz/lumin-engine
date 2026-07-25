@@ -1,13 +1,13 @@
 import { Index } from '@upstash/vector';
 import { inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { OpenAI } from 'openai';
 import { CONFIG } from '../config';
 import * as schema from '../db/schema';
 import type { EnvBindings } from '../types';
 import { captureWorkerError } from '../utils';
 import { computeHybridUserVector } from './recommendations';
 import { fetchEventVectors } from './vector';
+import { createEmbeddingClient } from './embedding';
 
 export const updateSingleTagVector = async (
   tag: string,
@@ -130,7 +130,7 @@ export const scheduledRecommendationUpdate = async (
       url: env.VECTOR_URL,
       token: env.VECTOR_TOKEN,
     });
-    const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    const embeddingClient = createEmbeddingClient(env);
 
     // Get recently active users
     const twoDaysAgo = new Date(
@@ -149,7 +149,7 @@ export const scheduledRecommendationUpdate = async (
             const userVector = await computeHybridUserVector(
               user.userId,
               env,
-              openai,
+              embeddingClient,
               vectorIndex
             );
 

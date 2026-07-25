@@ -23,7 +23,7 @@ vi.mock('./recommendations', async (importOriginal) => {
   };
 });
 
-const mockOpenAI = {} as any;
+const mockEmbeddingClient = {} as any;
 const mockVectorIndex = {} as any;
 
 const createMockVector = (seed: number, length = CONFIG.EMBEDDING.DIMENSIONS) => {
@@ -77,7 +77,7 @@ describe('computeHybridUserVector', () => {
     // Let the real getCollaborativeVector run.
 
     // 2. Act
-    const finalVector = await computeHybridUserVector(userId, mockEnv, mockOpenAI, mockVectorIndex);
+    const finalVector = await computeHybridUserVector(userId, mockEnv, mockEmbeddingClient, mockVectorIndex);
 
     // 3. Assert
     // Assert that the function is called with the correct components and weights
@@ -109,7 +109,7 @@ describe('computeHybridUserVector', () => {
     // getCollaborativeVector will be called, but its mocked deps will result in a zero vector
 
     // 2. Act
-    const finalVector = await computeHybridUserVector(userId, mockEnv, mockOpenAI, mockVectorIndex);
+    const finalVector = await computeHybridUserVector(userId, mockEnv, mockEmbeddingClient, mockVectorIndex);
 
     // 3. Assert
     expect(combineVectorsSpy).toHaveBeenCalledWith([
@@ -135,7 +135,7 @@ describe('computeHybridUserVector', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // 2. Act
-    const finalVector = await computeHybridUserVector(userId, mockEnv, mockOpenAI, mockVectorIndex);
+    const finalVector = await computeHybridUserVector(userId, mockEnv, mockEmbeddingClient, mockVectorIndex);
 
     // 3. Assert
     const zeroVector = new Array(CONFIG.EMBEDDING.DIMENSIONS).fill(0);

@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import type { EnvBindings } from '../types';
-import { handleError, validateInput } from '../utils';
+import { handleError } from '../utils';
 import { ingestEventSchema } from '../validation/tinybird-schemas';
 import { processEventIngestion } from '../services/eventService';
 
@@ -9,21 +9,16 @@ export const ingestEventTinybirdRoute = async (
 ) => {
   try {
     const body = await c.req.json();
-    const eventData = validateInput(body, ingestEventSchema);
+    const eventData = ingestEventSchema.parse(body);
 
-    // Ensure tags is always an array
-    const eventDataWithTags = {
-      ...eventData,
-      tags: eventData.tags ?? []
-    };
-
-    const { tinybirdResult } = await processEventIngestion(c, eventDataWithTags, {
+    const { eventId, tinybirdResult } = await processEventIngestion(c, eventData, {
       writeToD1: false,
     });
 
     return c.json(
       {
         success: true,
+        event_id: eventId,
         message: `Event ${eventData.title} ingested.`,
         tinybird_response: tinybirdResult,
       },

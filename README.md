@@ -196,16 +196,18 @@ Get personalized event recommendations for a user.
 {
   "recommendations": [
     {
-      "id": "event_123",
-      "title": "Tech Meetup: AI and Ethics",
-      "tags": ["technology", "ai", "ethics"],
-      "host": "Tech Community",
+      "event_id": "event_123",
       "score": 0.89,
-      "reason": "content" | "trending" | "serendipity"
+      "diversified": false
     }
   ],
-  "cached": false,
-  "ab_group": "A"
+  "metadata": {
+    "user_id": "user_456",
+    "ab_group": "A",
+    "exploration_rate": 0.25,
+    "total_candidates": 42,
+    "cache_hit": false
+  }
 }
 ```
 
@@ -218,12 +220,19 @@ Log user interactions to update taste profiles in real-time.
 **Request Body:**
 ```json
 {
+  "id": "interaction_01JXYZ",
   "user_id": "user_456",
   "event_id": "event_123",
   "action": "view" | "click" | "like" | "dislike" | "select_tags" | "signup",
+  "session_id": "session_123",
+  "source": "web",
   "tags": ["optional", "for", "select_tags"]
 }
 ```
+
+`id` is supplied by the caller and is the idempotency key for the interaction.
+The same ID is reused in D1 and Tinybird, so safely retrying a request does not
+teach the recommendation model twice.
 
 **Action Weights:**
 - `select_tags`: 5.0 (highest signal)
@@ -237,7 +246,8 @@ Log user interactions to update taste profiles in real-time.
 ```json
 {
   "success": true,
-  "message": "Interaction logged successfully"
+  "interaction_id": "interaction_01JXYZ",
+  "message": "Interaction logged for user user_456"
 }
 ```
 
@@ -257,7 +267,7 @@ Submit a new event to the recommendation system.
   "host": "City Events Co",
   "category": "entertainment",
   "location": "San Francisco, CA",
-  "start_date": "2025-07-15T18:00:00Z",
+  "event_date": 1752602400000,
   "metadata": {
     "url": "https://example.com/events/789",
     "image_url": "https://example.com/images/789.jpg",
@@ -269,18 +279,17 @@ Submit a new event to the recommendation system.
 **Process:**
 1. Validates event schema with Zod
 2. Generates semantic embedding (OpenAI)
-3. Parallel writes to:
-   - Upstash Vector (with metadata)
-   - Tinybird (analytics ingestion)
-   - Cloudflare D1 (relational storage)
-4. Compensation queue for failed operations
+3. Starts Tinybird ingestion while the embedding is generated
+4. Stores the same caller-supplied ID in Upstash Vector and D1
+5. Queues failed Tinybird, vector, or D1 operations for idempotent retry
 
 **Response:**
 ```json
 {
   "success": true,
   "event_id": "event_789",
-  "vector_id": "vec_xyz"
+  "message": "Event \"Summer Music Festival 2025\" ingested.",
+  "tinybird_response": {}
 }
 ```
 

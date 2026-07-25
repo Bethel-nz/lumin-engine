@@ -1,5 +1,24 @@
 import { vi } from 'vitest';
 
+/**
+ * Chainable D1 mock covering the raw `prepare().bind()` + `batch()` surface used
+ * by persistEventToD1 and D1CompensationQueue. Build a fresh one per test —
+ * vi.resetAllMocks() strips the implementations off a shared instance.
+ */
+export const createD1Mock = () => {
+  const statement = {
+    bind: vi.fn(() => statement),
+    run: vi.fn().mockResolvedValue({ success: true, meta: {} }),
+    first: vi.fn().mockResolvedValue(null),
+    all: vi.fn().mockResolvedValue({ results: [], success: true }),
+  };
+  return {
+    prepare: vi.fn(() => statement),
+    batch: vi.fn().mockResolvedValue([]),
+    statement,
+  };
+};
+
 // Mock Upstash Vector
 vi.mock('@upstash/vector', () => {
   const mockIndex = {
@@ -12,21 +31,10 @@ vi.mock('@upstash/vector', () => {
   };
 });
 
-// Mock OpenAI
-vi.mock('openai', () => {
-  const mockOpenAI = {
-    embeddings: {
-      create: vi.fn().mockResolvedValue({
-        data: [
-          { embedding: new Array(1536).fill(0).map(() => Math.random()) },
-        ],
-      }),
-    },
-  };
-  return {
-    __esModule: true,
-    default: vi.fn(() => mockOpenAI),
-  };
+export const createEmbeddingClientMock = () => ({
+  embed: vi
+    .fn()
+    .mockResolvedValue(new Array(1536).fill(0).map(() => Math.random())),
 });
 
 // Mock Drizzle ORM for D1

@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { getOpenAIClient, getVectorIndex } from '../lib/clients';
+import { getEmbeddingClient, getVectorIndex } from '../lib/clients';
 import {
   getExplorationRate,
   injectExploration,
@@ -57,7 +57,7 @@ export const getRecommendationsRoute = async (
 
     const hashKey = `recs_hash:${userId}`;
     const vectorIndex = getVectorIndex(c);
-    const openai = getOpenAIClient(c);
+    const embeddingClient = getEmbeddingClient(c);
 
     const userTagsStr = await c.env.CACHE.get(`user_tags:${userId}`);
     const userSelectedTags: Set<string> = userTagsStr
@@ -73,7 +73,7 @@ export const getRecommendationsRoute = async (
     const userVector = await computeHybridUserVector(
       userId,
       c.env,
-      openai,
+      embeddingClient,
       vectorIndex
     );
 
@@ -180,7 +180,7 @@ export const getRecommendationsRoute = async (
     await trackExplorationSuccess(userId, enriched, c.env);
 
     const newRecsStr = JSON.stringify(enriched);
-    const newHash = generateHash(newRecsStr);
+    const newHash = await generateHash(newRecsStr);
 
     await c.env.CACHE.put(cacheKey, newRecsStr, { expirationTtl: 1800 });
     await c.env.CACHE.put(hashKey, newHash, { expirationTtl: 1800 });

@@ -1,0 +1,33 @@
+NODE endpoint
+SQL >
+    %
+    SELECT groupArray(category) AS preferred_categories
+        FROM
+        (
+          SELECT
+            any(events.category) AS category,
+            count() AS interaction_count
+          FROM
+          (
+            SELECT id, any(user_id) AS user_id, any(event_id) AS event_id,
+                   any(action) AS action, max(timestamp) AS timestamp
+            FROM interactions__v1
+            GROUP BY id
+          ) AS interactions
+          INNER JOIN
+          (
+            SELECT id, argMax(category, updated_at) AS category
+            FROM events__v1
+            GROUP BY id
+          ) AS events ON events.id = interactions.event_id
+          WHERE interactions.user_id = {{ String(user_id, required=True) }}
+            AND interactions.action IN ('view', 'click', 'like')
+            AND interactions.timestamp >= toUnixTimestamp64Milli(
+              now64(3) - INTERVAL {{ Int64(days, 7) }} DAY
+            )
+            AND events.category != ''
+          GROUP BY events.category
+          ORDER BY interaction_count DESC
+        )
+
+TYPE endpoint

@@ -55,7 +55,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
   const mockVectorIndex = {
     query: vi.fn(),
   };
-  const mockOpenAI = {} as any;
+  const mockEmbeddingClient = {} as any;
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -85,7 +85,7 @@ describe('getRecommendationsRoute - Dynamic Limits & TinyBird Integration', () =
 
     // Setup successful default responses
     vi.mocked(clients.getVectorIndex).mockReturnValue(mockVectorIndex);
-    vi.mocked(clients.getOpenAIClient).mockReturnValue(mockOpenAI);
+    vi.mocked(clients.getEmbeddingClient).mockReturnValue(mockEmbeddingClient);
   });
 
   /**

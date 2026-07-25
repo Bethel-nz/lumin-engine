@@ -15,6 +15,7 @@ export const eventsSchema = defineSchema({
   tags: array('tags', z.string(), { innerType: 'String' }),
   host: nullable('host', z.string(), { innerType: 'String' }),
   category: nullable('category', z.string(), { innerType: 'String' }),
+  image_url: nullable('image_url', z.string(), { innerType: 'String' }),
   event_date: nullable('event_date', z.number(), { innerType: 'Int64' }),
   location: nullable('location', z.string(), { innerType: 'String' }),
   capacity: nullable('capacity', z.number().int(), { innerType: 'Int64' }),
@@ -43,7 +44,7 @@ export const interactionsSchema = defineSchema({
   duration_ms: nullable('duration_ms', z.number().int(), {
     innerType: 'Int64',
   }),
-  tags: nullable('tags', z.array(z.string()), { innerType: 'Array(String)' }),
+  tags: array('tags', z.string(), { innerType: 'String' }),
   timestamp: int64('timestamp'),
   metadata: nullable('metadata', z.string(), { innerType: 'String' }),
 });
@@ -57,11 +58,13 @@ export const interactionsDataSource = defineDataSource({
 
 // ---- INGESTION SCHEMAS ----
 export const ingestEventSchema = z.object({
+  id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
   tags: z.array(z.string()).default([]),
   host: z.string().optional(),
   category: z.string().optional(),
+  image_url: z.string().url().optional(),
   event_date: z.number().int().optional(),
   location: z.string().optional(),
   capacity: z.number().int().optional(),
@@ -71,6 +74,7 @@ export const ingestEventSchema = z.object({
 
 export const logInteractionSchema = z
   .object({
+    id: z.string().min(1),
     user_id: z.string().min(1),
     event_id: z.string().min(1),
     action: z.enum([
@@ -101,7 +105,24 @@ export const logInteractionSchema = z
 
 export const trendingEventsQuerySchema = z.object({
   limit: z.number().int().default(10),
-  days: z.number().int().default(7),
+  hours: z.number().int().positive().default(24),
+  category: z.string().optional(),
+});
+
+export const realtimeTrendingQuerySchema = z.object({
+  limit: z.number().int().default(10),
+  minutes: z.number().int().positive().default(60),
+});
+
+export const userBehaviorQuerySchema = z.object({
+  user_id: z.string().min(1),
+  days: z.number().int().positive().default(30),
+});
+
+export const locationTrendsQuerySchema = z.object({
+  location: z.string().min(1),
+  limit: z.number().int().default(10),
+  days: z.number().int().positive().default(7),
 });
 
 export const eventSimilarityQuerySchema = z.object({
@@ -113,7 +134,24 @@ export const trendingEventResponseSchema = z.object({
   event_id: z.string(),
   title: z.string(),
   category: z.string().nullable(),
-  score: z.number(),
+  interaction_count: z.number(),
+  engagement_rate: z.number(),
+});
+
+export const realtimeTrendingResponseSchema = z.object({
+  event_id: z.string(),
+  interaction_velocity: z.number(),
+  engagement_score: z.number(),
+});
+
+export const userBehaviorResponseSchema = z.object({
+  preferred_categories: z.array(z.string()),
+});
+
+export const locationTrendResponseSchema = z.object({
+  event_id: z.string(),
+  interaction_count: z.number(),
+  engagement_rate: z.number(),
 });
 
 export const eventSimilarityResponseSchema = z.object({
@@ -124,3 +162,4 @@ export const eventSimilarityResponseSchema = z.object({
 });
 
 export type IngestEvent = z.infer<typeof ingestEventSchema>;
+export type LogInteraction = z.infer<typeof logInteractionSchema>;

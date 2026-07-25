@@ -1,0 +1,18 @@
+SCHEMA >
+    `id` String `json:$.id`,
+    `title` String `json:$.title`,
+    `description` Nullable(String) `json:$.description`,
+    `tags` Array(String) `json:$.tags[:]`,
+    `host` Nullable(String) `json:$.host`,
+    `category` Nullable(String) `json:$.category`,
+    `image_url` Nullable(String) `json:$.image_url`,
+    `event_date` Nullable(Int64) `json:$.event_date`,
+    `location` Nullable(String) `json:$.location`,
+    `capacity` Nullable(Int64) `json:$.capacity`,
+    `price` Nullable(Float64) `json:$.price`,
+    `created_at` Int64 `json:$.created_at`,
+    `updated_at` Int64 `json:$.updated_at`,
+    `metadata` Nullable(String) `json:$.metadata`
+
+ENGINE "MergeTree"
+ENGINE_SORTING_KEY "created_at,id"

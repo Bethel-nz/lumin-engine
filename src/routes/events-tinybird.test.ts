@@ -5,6 +5,7 @@ import * as clients from '../lib/clients';
 import * as tinybird from '../lib/tinybird';
 import * as vector from '../services/vector';
 import * as utils from '../utils';
+import { createD1Mock } from '../lib/test-utils';
 import type { EnvBindings } from '../types';
 
 vi.mock('../lib/clients');
@@ -29,14 +30,15 @@ describe('ingestEventRoute with TinyBird', () => {
     env: {
       TINYBIRD_TOKEN: 'test-token',
       TINYBIRD_BASE_URL: 'https://api.tinybird.co',
-    } as EnvBindings,
+      DB: createD1Mock(),
+    } as unknown as EnvBindings,
   } as unknown as Context<{ Bindings: EnvBindings }>;
 
   const mockVectorIndex = {
     upsert: vi.fn().mockResolvedValue({ success: true }),
   };
 
-  const mockOpenAI = {} as any;
+  const mockEmbeddingClient = {} as any;
   
   const mockTinybirdClient = {} as any;
   const mockIngestEndpoint = vi.fn().mockResolvedValue({
@@ -47,7 +49,7 @@ describe('ingestEventRoute with TinyBird', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(clients.getVectorIndex).mockReturnValue(mockVectorIndex);
-    vi.mocked(clients.getOpenAIClient).mockReturnValue(mockOpenAI);
+    vi.mocked(clients.getEmbeddingClient).mockReturnValue(mockEmbeddingClient);
     vi.mocked(tinybird.getTinybirdClient).mockReturnValue(mockTinybirdClient);
     vi.mocked(tinybird.createEventIngestionEndpoint).mockReturnValue(mockIngestEndpoint);
   });
@@ -72,7 +74,7 @@ describe('ingestEventRoute with TinyBird', () => {
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue(mockVector);
     mockIngestEndpoint.mockResolvedValue(mockTinybirdResponse);
 
     await ingestEventRoute(mockContext);
@@ -81,13 +83,12 @@ describe('ingestEventRoute with TinyBird', () => {
     expect(tinybird.createEventIngestionEndpoint).toHaveBeenCalledWith(mockTinybirdClient);
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...eventData,
-      created_at: expect.any(Number),
-      updated_at: expect.any(Number),
     });
 
-    expect(vector.generateEmbedding).toHaveBeenCalledWith(
+    expect(vector.generateMultimodalEmbedding).toHaveBeenCalledWith(
       'Test Event A test event tech conference hosted by Test Host',
-      mockOpenAI
+      undefined,
+      mockEmbeddingClient
     );
 
     expect(mockVectorIndex.upsert).toHaveBeenCalledWith([
@@ -99,6 +100,7 @@ describe('ingestEventRoute with TinyBird', () => {
           tags: ['tech', 'conference'],
           host: 'Test Host',
           category: 'technology',
+          image_url: '',
           location: 'San Francisco',
         },
       },
@@ -106,7 +108,8 @@ describe('ingestEventRoute with TinyBird', () => {
 
     expect(mockContext.json).toHaveBeenCalledWith({
       success: true,
-      message: 'Event event-123 ingested.',
+      event_id: 'event-123',
+      message: 'Event "Test Event" ingested.',
       tinybird_response: mockTinybirdResponse,
     }, 201);
   });
@@ -121,14 +124,12 @@ describe('ingestEventRoute with TinyBird', () => {
     const mockVector = [0.1, 0.2, 0.3];
     
     vi.mocked(mockContext.req.json).mockResolvedValue(minimalEventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue(mockVector);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue(mockVector);
 
     await ingestEventRoute(mockContext);
 
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...minimalEventData,
-      created_at: expect.any(Number),
-      updated_at: expect.any(Number),
     });
 
     expect(mockVectorIndex.upsert).toHaveBeenCalledWith([
@@ -140,6 +141,7 @@ describe('ingestEventRoute with TinyBird', () => {
           tags: ['basic'],
           host: '',
           category: '',
+          image_url: '',
           location: '',
         },
       },
@@ -156,7 +158,7 @@ describe('ingestEventRoute with TinyBird', () => {
     const zeroVector = [0, 0, 0];
     
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue(zeroVector);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue(zeroVector);
 
     await ingestEventRoute(mockContext);
 
@@ -177,15 +179,21 @@ describe('ingestEventRoute with TinyBird', () => {
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockIngestEndpoint.mockRejectedValue(new Error('TinyBird API Error'));
 
     await ingestEventRoute(mockContext);
 
-    expect(utils.handleError).toHaveBeenCalledWith(
-      mockContext,
-      expect.any(Error),
-      'Failed to ingest event'
+    // A TinyBird outage is queued for compensation rather than failing the
+    // request - the embedding and vector write still have to land.
+    expect(utils.handleError).not.toHaveBeenCalled();
+    expect(mockVectorIndex.upsert).toHaveBeenCalled();
+    expect(mockContext.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        event_id: 'event-tinybird-fail',
+      }),
+      201
     );
   });
 
@@ -197,7 +205,7 @@ describe('ingestEventRoute with TinyBird', () => {
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(eventData);
-    vi.mocked(vector.generateEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
+    vi.mocked(vector.generateMultimodalEmbedding).mockResolvedValue([0.1, 0.2, 0.3]);
     mockVectorIndex.upsert.mockRejectedValue(new Error('Vector API Error'));
 
     await ingestEventRoute(mockContext);

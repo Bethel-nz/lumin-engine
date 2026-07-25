@@ -1,4 +1,3 @@
-import { hashSync } from 'bcrypt-edge';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import type { ABTestGroup } from '../types';
@@ -39,8 +38,11 @@ export const withRetry = async <T>(
   throw new Error('Max retries reached');
 };
 
-export const generateHash = (data: string): string => {
-  return hashSync(data, 8);
+export const generateHash = async (data: string): Promise<string> => {
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(data));
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 };
 
 export const captureWorkerError = <T>(

@@ -1,0 +1,14 @@
+SCHEMA >
+    `id` String `json:$.id`,
+    `user_id` String `json:$.user_id`,
+    `event_id` String `json:$.event_id`,
+    `action` String `json:$.action`,
+    `session_id` String `json:$.session_id`,
+    `source` String `json:$.source`,
+    `duration_ms` Nullable(Int64) `json:$.duration_ms`,
+    `tags` Array(String) `json:$.tags[:]`,
+    `timestamp` Int64 `json:$.timestamp`,
+    `metadata` Nullable(String) `json:$.metadata`
+
+ENGINE "MergeTree"
+ENGINE_SORTING_KEY "timestamp,user_id,event_id"

@@ -10,20 +10,25 @@
     "VECTOR_URL": "",
     "VECTOR_TOKEN": "",
     "X_APP_KEY": "",
-    "OPENAI_API_KEY": "your-embedding-model-api-key",
-    "AI_BASE_URL":"https://models.github.ai/inference",
+    "GEMINI_API_KEY": "your-gemini-api-key",
     "TINYBIRD_TOKEN": "",
     "TINYBIRD_BASE_URL": "https://api.tinybird.co",
     "ALERTS_WEBHOOK": "your_webhook_endpoint",
-    "MONITORING_ENDPOINT": "https://..."
-	"MONITORING_TOKEN":"..."
-	"METRICS_ENDPOINT":"https://..."
-	"METRICS_TOKEN":"..."
+    "MONITORING_ENDPOINT": "https://...",
+    "MONITORING_TOKEN": "...",
+    "METRICS_ENDPOINT": "https://...",
+    "METRICS_TOKEN": "...",
+    "BETTER_AUTH_SECRET": "generate-with-openssl-rand-base64-32",
+    "BETTER_AUTH_URL": "http://localhost:8787"
   },
   "kv_namespaces": [
     {
       "binding": "CACHE",
       "id": "your_kv_namespace_id"
+    },
+    {
+      "binding": "TAG_VECTORS_KV",
+      "id": "your_tag_vectors_kv_namespace_id"
     }
   ],
   "d1_databases": [
@@ -31,10 +36,13 @@
       "binding": "DB",
       "database_name": "lumin-db",
       "database_id": "your_database_id",
-      "migrations_dir": "db/migrations"
+      "migrations_dir": "migrations"
     }
   ],
   "observability": {
     "enabled": true
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *", "*/30 * * * *", "0 * * * *"]
   }
 }

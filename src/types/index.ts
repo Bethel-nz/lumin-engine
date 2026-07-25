@@ -5,9 +5,11 @@ export interface EnvBindings {
   VECTOR_URL: string;
   VECTOR_TOKEN: string;
   X_APP_KEY: string;
-  OPENAI_API_KEY: string;
+  GEMINI_API_KEY: string;
   TINYBIRD_TOKEN: string;
   TINYBIRD_BASE_URL: string;
+  BETTER_AUTH_SECRET?: string;
+  BETTER_AUTH_URL?: string;
   ENVIRONMENT?: string;
   MONITORING_ENDPOINT?: string;
   MONITORING_TOKEN?: string;
@@ -137,4 +139,9 @@ export interface MetricData {
   unit?: string;
   tags?: Record<string, string>;
   timestamp?: number;
+}
+
+export interface AppVariables {
+  userId: string | null;
+  apiKeyId: string | null;
 }

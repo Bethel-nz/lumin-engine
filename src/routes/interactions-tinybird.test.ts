@@ -4,6 +4,7 @@ import { logInteractionRoute } from './interactions';
 import * as database from '../services/database';
 import * as tinybird from '../lib/tinybird';
 import * as utils from '../utils';
+import { createD1Mock } from '../lib/test-utils';
 import type { EnvBindings } from '../types';
 
 vi.mock('../services/database');
@@ -12,26 +13,30 @@ vi.mock('../utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils')>();
   return {
     ...actual,
-    validateInput: vi.fn((data) => data),
     withRetry: vi.fn((fn) => fn()),
     handleError: vi.fn(), // Mock error handler as a spy
   };
 });
 
+/**
+ * Focused on what reaches TinyBird. The route does not read request headers -
+ * client context arrives as the caller-supplied `source` field - so these tests
+ * exercise source passthrough rather than user-agent sniffing.
+ */
 describe('logInteractionRoute with TinyBird', () => {
   const mockContext = {
     req: {
       json: vi.fn(),
-      header: vi.fn(),
     },
     json: vi.fn(),
     env: {
       TINYBIRD_TOKEN: 'test-token',
+      DB: createD1Mock(),
       CACHE: {
         put: vi.fn(),
         delete: vi.fn(),
       },
-    } as EnvBindings,
+    } as unknown as EnvBindings,
   } as unknown as Context<{ Bindings: EnvBindings }>;
 
   const mockTinybirdClient = {} as any;
@@ -42,14 +47,22 @@ describe('logInteractionRoute with TinyBird', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (mockContext.env as unknown as { DB: unknown }).DB = createD1Mock();
+    mockIngestEndpoint.mockResolvedValue({
+      successful_rows: 1,
+      quarantined_rows: 0,
+    });
     vi.mocked(tinybird.getTinybirdClient).mockReturnValue(mockTinybirdClient);
-    vi.mocked(tinybird.createInteractionIngestionEndpoint).mockReturnValue(mockIngestEndpoint);
-    vi.mocked(database.checkUserExists).mockResolvedValue(true);
+    vi.mocked(tinybird.createInteractionIngestionEndpoint).mockReturnValue(
+      mockIngestEndpoint
+    );
+    vi.mocked(database.upsertUserProfile).mockResolvedValue();
     vi.mocked(database.insertInteraction).mockResolvedValue();
   });
 
   it('should successfully log interaction to TinyBird with enriched data', async () => {
     const interactionData = {
+      id: 'interaction-001',
       user_id: 'user-123',
       event_id: 'event-456',
       action: 'click',
@@ -59,90 +72,94 @@ describe('logInteractionRoute with TinyBird', () => {
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
-    vi.mocked(mockContext.req.header)
-      .mockReturnValueOnce('192.168.1.100')
-      .mockReturnValueOnce('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
-      .mockReturnValueOnce('https://example.com/events');
 
     await logInteractionRoute(mockContext);
 
     expect(tinybird.getTinybirdClient).toHaveBeenCalledWith(mockContext);
-    expect(mockIngestEndpoint).toHaveBeenCalledWith({
-      ...interactionData,
-      timestamp: expect.any(Number),
-    });
+    expect(tinybird.createInteractionIngestionEndpoint).toHaveBeenCalledWith(
+      mockTinybirdClient
+    );
+    expect(mockIngestEndpoint).toHaveBeenCalledWith(interactionData);
 
     expect(mockContext.env.CACHE.delete).toHaveBeenCalledWith('recs:user-123');
-    expect(mockContext.env.CACHE.delete).toHaveBeenCalledWith('recs_hash:user-123');
+    expect(mockContext.env.CACHE.delete).toHaveBeenCalledWith(
+      'recs_hash:user-123'
+    );
 
-    expect(mockContext.json).toHaveBeenCalledWith({
-      success: true,
-      message: 'Interaction logged for user user-123',
-    }, 201);
+    expect(mockContext.json).toHaveBeenCalledWith(
+      {
+        success: true,
+        interaction_id: 'interaction-001',
+        message: 'Interaction logged for user user-123',
+      },
+      201
+    );
   });
 
-  it('should handle mobile platform interactions', async () => {
+  it('should pass the client source through to TinyBird unchanged', async () => {
+    for (const source of ['web', 'ios', 'android', 'tablet']) {
+      vi.clearAllMocks();
+      vi.mocked(tinybird.getTinybirdClient).mockReturnValue(mockTinybirdClient);
+      vi.mocked(tinybird.createInteractionIngestionEndpoint).mockReturnValue(
+        mockIngestEndpoint
+      );
+      mockIngestEndpoint.mockResolvedValue({
+        successful_rows: 1,
+        quarantined_rows: 0,
+      });
+
+      const interactionData = {
+        id: `interaction-${source}`,
+        user_id: `user-${source}`,
+        event_id: 'event-123',
+        action: 'view',
+        session_id: `session-${source}`,
+        source,
+      };
+
+      vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
+
+      await logInteractionRoute(mockContext);
+
+      expect(mockIngestEndpoint).toHaveBeenCalledWith(interactionData);
+    }
+  });
+
+  it('should default a missing source to web', async () => {
     const interactionData = {
-      user_id: 'user-mobile',
+      id: 'interaction-nosource',
+      user_id: 'user-nosource',
       event_id: 'event-123',
       action: 'view',
-      session_id: 'session-mobile',
+      session_id: 'session-nosource',
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
-    vi.mocked(mockContext.req.header)
-      .mockReturnValueOnce('10.0.0.1')
-      .mockReturnValueOnce('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1)')
-      .mockReturnValueOnce(null);
 
     await logInteractionRoute(mockContext);
 
     expect(mockIngestEndpoint).toHaveBeenCalledWith({
       ...interactionData,
-      timestamp: expect.any(Number),
-    });
-  });
-
-  it('should handle tablet platform interactions', async () => {
-    const interactionData = {
-      user_id: 'user-tablet',
-      event_id: 'event-123',
-      action: 'like',
-      session_id: 'session-tablet',
-    };
-
-    vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
-    vi.mocked(mockContext.req.header)
-      .mockReturnValueOnce(null)
-      .mockReturnValueOnce('Mozilla/5.0 (iPad; CPU OS 15_0)')
-      .mockReturnValueOnce(null);
-
-    await logInteractionRoute(mockContext);
-
-    expect(mockIngestEndpoint).toHaveBeenCalledWith({
-      ...interactionData,
-      timestamp: expect.any(Number),
+      source: 'web',
     });
   });
 
   it('should handle select_tags action and update user cache', async () => {
     const interactionData = {
+      id: 'interaction-tags',
       user_id: 'user-tags',
       event_id: 'event-123',
       action: 'select_tags',
       session_id: 'session-tags',
+      source: 'web',
       tags: ['tech', 'conference'],
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
-    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
 
-    expect(mockIngestEndpoint).toHaveBeenCalledWith({
-      ...interactionData,
-      timestamp: expect.any(Number),
-    });
+    expect(mockIngestEndpoint).toHaveBeenCalledWith(interactionData);
 
     expect(mockContext.env.CACHE.put).toHaveBeenCalledWith(
       'user_tags:user-tags',
@@ -151,46 +168,50 @@ describe('logInteractionRoute with TinyBird', () => {
     );
   });
 
-  it('should handle new user signup', async () => {
+  it('should upsert the profile for a new user', async () => {
     const interactionData = {
+      id: 'interaction-new',
       user_id: 'new-user',
       event_id: 'event-123',
       action: 'view',
       session_id: 'session-new',
+      source: 'web',
     };
 
-    vi.mocked(database.checkUserExists).mockResolvedValue(false);
     vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
-    vi.mocked(mockContext.req.header).mockReturnValue(null);
 
     await logInteractionRoute(mockContext);
+
+    expect(database.upsertUserProfile).toHaveBeenCalledWith(
+      mockContext.env.DB,
+      'new-user'
+    );
 
     expect(database.insertInteraction).toHaveBeenCalledWith(
       mockContext.env.DB,
       {
+        id: 'interaction-new',
         user_id: 'new-user',
-        event_id: 'initial_signup',
-        action: 'signup',
+        event_id: 'event-123',
+        action: 'view',
         timestamp: expect.any(Number),
       }
     );
 
-    expect(mockIngestEndpoint).toHaveBeenCalledWith({
-      ...interactionData,
-      timestamp: expect.any(Number),
-    });
+    expect(mockIngestEndpoint).toHaveBeenCalledWith(interactionData);
   });
 
   it('should handle TinyBird ingestion failure', async () => {
     const interactionData = {
+      id: 'interaction-fail',
       user_id: 'user-fail',
       event_id: 'event-123',
       action: 'click',
       session_id: 'session-fail',
+      source: 'web',
     };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(interactionData);
-    vi.mocked(mockContext.req.header).mockReturnValue(null);
     mockIngestEndpoint.mockRejectedValue(new Error('TinyBird API Error'));
 
     await logInteractionRoute(mockContext);
@@ -206,9 +227,6 @@ describe('logInteractionRoute with TinyBird', () => {
     const invalidData = { user_id: 'user', action: 'invalid' };
 
     vi.mocked(mockContext.req.json).mockResolvedValue(invalidData);
-    vi.mocked(utils.validateInput).mockImplementation(() => {
-      throw new Error('Validation failed');
-    });
 
     await logInteractionRoute(mockContext);
 
@@ -220,5 +238,4 @@ describe('logInteractionRoute with TinyBird', () => {
 
     expect(mockIngestEndpoint).not.toHaveBeenCalled();
   });
-
 });
