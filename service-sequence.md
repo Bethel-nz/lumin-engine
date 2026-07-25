@@ -53,10 +53,12 @@ sequenceDiagram
 
     alt Log Interaction
         User->>+Lumin Service: POST /log-interactions
-        Lumin Service->>+Tinybird: Ingest interaction analytics
+        Lumin Service->>+D1 Database: Upsert user profile
+        D1 Database-->>-Lumin Service: User profile current
+        Lumin Service->>+D1 Database: Insert idempotent interaction
+        D1 Database-->>-Lumin Service: Interaction stored for learning
+        Lumin Service->>+Tinybird: Ingest same interaction ID for analytics
         Tinybird-->>-Lumin Service: Confirm ingestion
-        Lumin Service->>+D1 Database: Check if new user & insert signup
-        D1 Database-->>-Lumin Service: User status
         Lumin Service->>+KV Cache: Delete cached recommendations
         KV Cache-->>-Lumin Service: Confirm deletion
         Lumin Service-->>-User: 201 Created
