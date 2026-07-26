@@ -144,4 +144,6 @@ export interface MetricData {
 export interface AppVariables {
   userId: string | null;
   apiKeyId: string | null;
+  tenantId: string | null;
+  catalog: import('../services/catalogs').Catalog | null;
 }

@@ -25,7 +25,7 @@
 - Create: `migrations/0004_add_tenants_and_catalogs.sql`
 - Create: `src/db/schema/catalogs.ts`
 - Modify: `src/db/schema/index.ts`
-- Test: `src/db/schema/catalogs.test.ts`
+- Test: none. No schema file in this repo carries a unit test, and a test over a drizzle declaration restates the declaration. The SQL/drizzle agreement is exercised for real by Task 3, whose storage tests bind against these column names.
 
 **Interfaces:**
 - Consumes: nothing.
