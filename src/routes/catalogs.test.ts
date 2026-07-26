@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createCatalogRoute, listCatalogsRoute } from './catalogs';
+import { createCatalogRoute, listCatalogsRoute, getCatalogRoute } from './catalogs';
 import * as catalogs from '../services/catalogs';
 import * as utils from '../utils';
 import { createD1Mock } from '../lib/test-utils';
@@ -50,7 +50,12 @@ describe('createCatalogRoute', () => {
       expect.objectContaining({ name: 'products' })
     );
     expect(c.json).toHaveBeenCalledWith(
-      expect.objectContaining({ catalog_id: 'cat-1', name: 'products' }),
+      {
+        catalog_id: 'cat-1',
+        name: 'products',
+        fields: body.fields,
+        embed_config: body.embed_config,
+      },
       201
     );
   });
@@ -89,6 +94,29 @@ describe('createCatalogRoute', () => {
     );
     expect(utils.handleError).not.toHaveBeenCalled();
   });
+
+  it('does not treat a UNIQUE error on an unrelated index as a catalog-name conflict', async () => {
+    const c = makeContext();
+    c.req.json.mockResolvedValue(body);
+    vi.mocked(catalogs.ensureTenant).mockResolvedValue();
+    vi.mocked(catalogs.createCatalog).mockRejectedValue(
+      new Error('D1_ERROR: UNIQUE constraint failed: tenants.id')
+    );
+
+    await createCatalogRoute(c);
+
+    expect(utils.handleError).toHaveBeenCalledWith(
+      c,
+      expect.any(Error),
+      'Failed to create catalog'
+    );
+    expect(c.json).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringContaining('already exists'),
+      }),
+      409
+    );
+  });
 });
 
 describe('listCatalogsRoute', () => {
@@ -102,5 +130,29 @@ describe('listCatalogsRoute', () => {
 
     expect(catalogs.listCatalogs).toHaveBeenCalledWith(c.env.DB, 'tenant-1');
     expect(c.json).toHaveBeenCalledWith({ catalogs: [] });
+  });
+});
+
+describe('getCatalogRoute', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('returns the catalog already resolved by requireCatalog', async () => {
+    const c = makeContext();
+    c.set('catalog', {
+      id: 'cat-1',
+      tenantId: 'tenant-1',
+      name: 'products',
+      fields: body.fields,
+      embedConfig: body.embed_config,
+    });
+
+    await getCatalogRoute(c);
+
+    expect(c.json).toHaveBeenCalledWith({
+      catalog_id: 'cat-1',
+      name: 'products',
+      fields: body.fields,
+      embed_config: body.embed_config,
+    });
   });
 });

@@ -11,7 +11,9 @@ import {
 type AppContext = Context<{ Bindings: EnvBindings; Variables: AppVariables }>;
 
 const isUniqueConstraintError = (error: unknown): boolean =>
-  error instanceof Error && error.message.includes('UNIQUE constraint failed');
+  error instanceof Error &&
+  error.message.includes('UNIQUE constraint failed') &&
+  error.message.includes('catalogs.tenant_id, catalogs.name');
 
 export const createCatalogRoute = async (c: AppContext) => {
   let catalogName: string | undefined;
