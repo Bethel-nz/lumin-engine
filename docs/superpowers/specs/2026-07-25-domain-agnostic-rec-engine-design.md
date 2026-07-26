@@ -67,11 +67,17 @@ item_id`. `event_id` becomes `item_id` throughout.
 means rebuilding both datasources and rewriting every pipe's WHERE clause a
 second time.
 
-**Catalog registry (D1)** - `catalogs` and `catalog_fields`. Each catalog
-declares its fields, and critically an **embed config**: which fields concatenate
-into the text input, and which field supplies the image URL. This replaces the
-hardcoded `${title} ${description} ${tags} hosted by ${host}` in
-`processEventIngestion`.
+**Catalog registry (D1)** - `tenants` and `catalogs`. Each catalog declares its
+fields, and critically an **embed config**: which fields concatenate into the
+text input, and which field supplies the image URL. This replaces the hardcoded
+`${title} ${description} ${tags} hosted by ${host}` in `processEventIngestion`.
+
+Field definitions are stored as a JSON column on `catalogs`, not as a normalized
+`catalog_fields` table. It matches how `embed_config` is stored, keeps the
+storage layer to one row per catalog, and adding keys later is backward
+compatible. The cost is that "which catalogs declare attribute X" needs a scan
+rather than an index — revisit if `facet_trends` or attribute promotion makes
+that query hot.
 
 **Vectors** - one Upstash index, namespace per `{tenant_id}:{catalog_id}`.
 Isolation is structural rather than a metadata filter that can be forgotten at
@@ -103,6 +109,23 @@ the field the catalog nominates.
 Effectively greenfield. The Tinybird workspace is empty and the Upstash index
 holds 0 vectors, so `events__v1` and the five event pipes are replaced outright
 rather than versioned alongside. There is no backfill and no dual-write window.
+
+### Merge condition: the legacy routes are not tenant-scoped
+
+Tenancy lands catalog-first. Until the item model and Upstash namespacing ship,
+`/ingest-event`, `/log-interactions`, `/search` and `/get-recommendations/:userId`
+authenticate with `requireApiKey` but carry no tenant concept: one un-namespaced
+Upstash index, no tenant column on events, and `:userId` accepts any value.
+
+Any valid API key can therefore read and write everything behind those four
+routes, while being correctly isolated from other tenants' catalogs. This is not
+a regression — it predates the registry — but the registry makes "tenant" a live
+provisioned concept, so the gap becomes reachable rather than theoretical.
+
+**No second API key may be issued in an environment holding real data until the
+item model and per-tenant vector namespacing are in place.** Whoever ships that
+work owns scoping these four routes; a reviewer seeing `resolveTenant` in the
+router would otherwise reasonably assume the whole service is tenant-safe.
 
 ## Error handling
 
