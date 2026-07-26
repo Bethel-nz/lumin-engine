@@ -14,6 +14,26 @@ Rather than keeping it tightly coupled to the main platform (which, admittedly, 
 
 Think of it as an open-source alternative to traditional recommendation systems, built for developers who want full control over their discovery experience without vendor lock-in.
 
+## Current State
+
+The engine is mid-migration from event-specific to domain-agnostic. What exists
+today:
+
+- **Done** — Gemini Embedding 2 multimodal embeddings (text + image), and the
+  tenancy layer: an API key resolves to a tenant, and tenants register catalogs
+  describing their own item shape via `/api/catalogs`.
+- **Next** — the generic `items__v1` model with a JSON attributes bag, per-tenant
+  Upstash vector namespacing, and a generic pipe surface. Ingestion, search and
+  recommendations still speak `event` until that lands.
+
+See [docs/superpowers/specs](docs/superpowers/specs) for the design and
+[docs/superpowers/plans](docs/superpowers/plans) for the implementation plans.
+
+> **Known gap:** `/ingest-event`, `/log-interactions`, `/search` and
+> `/get-recommendations/:userId` authenticate but are **not** tenant-scoped yet —
+> there is one un-namespaced vector index and no tenant column on events. Do not
+> issue a second API key against real data until the item model lands.
+
 ## Core Concepts
 
 ### The Hybrid Recommendation Approach
@@ -53,7 +73,8 @@ Every interaction updates the system immediately:
 | **Relational Database** | Cloudflare D1 (SQLite) + Drizzle ORM |
 | **Analytics Engine** | Tinybird (real-time data pipes) |
 | **Cache Layer** | Cloudflare KV |
-| **Embeddings Model** | OpenAI text-embedding-3-small |
+| **Embeddings Model** | Gemini Embedding 2 (multimodal, 1536-dim) |
+| **Auth** | Better Auth + API key plugin |
 | **Validation** | Zod |
 | **Testing** | Vitest |
 
@@ -77,9 +98,9 @@ Every interaction updates the system immediately:
 │  Hybrid Vector Computation               │
 │  • Fetch user interactions (D1)          │
 │  • Load interaction vectors (Upstash)    │
-│  • Generate tag embeddings (OpenAI)      │
+│  • Generate tag embeddings (Gemini)      │
 │  • Apply collaborative filtering (D1)    │
-│  • Blend with demographics (OpenAI)      │
+│  • Blend with demographics (Gemini)      │
 └──────────┬───────────────────────────────┘
            │
            v
@@ -119,7 +140,7 @@ Every interaction updates the system immediately:
 - **Cloudflare Workers** account
 - **Upstash Vector** database
 - **Tinybird** workspace
-- **OpenAI** API key
+- **Google AI** API key (Gemini)
 
 ### Environment Setup
 
@@ -131,14 +152,16 @@ VECTOR_URL=your_upstash_vector_url
 VECTOR_TOKEN=your_upstash_vector_token
 
 # AI Embeddings
-OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=your_google_ai_api_key
 
 # Analytics
 TINYBIRD_TOKEN=your_tinybird_token
-TINYBIRD_BASE_URL=https://api.tinybird.co
+# Tinybird Local runs on http://localhost:7181; use https://api.tinybird.co for cloud
+TINYBIRD_BASE_URL=http://localhost:7181
 
 # Authentication
-X_APP_KEY=your-secure-application-key
+BETTER_AUTH_SECRET=generate_with_openssl_rand_base64_32
+BETTER_AUTH_URL=http://localhost:8787
 
 # Optional: Monitoring
 MONITORING_ENDPOINT=https://...
@@ -148,41 +171,102 @@ METRICS_TOKEN=...
 ALERTS_WEBHOOK=https://...
 ```
 
-Configure `wrangler.toml` with:
+`wrangler.jsonc` is gitignored. Copy `wrangler.jsonc.template` and fill in:
 - D1 database binding (`DB`)
 - KV namespace bindings (`CACHE`, `TAG_VECTORS_KV`)
-- Environment variables (production secrets)
+- `account_id` and any production vars
 
 ### Development
 
 ```bash
-# Install dependencies
-npm install
-
-# Run local development server (connected to remote resources)
-npm run dev
-
-# Run tests
-npm run test
-
-# Deploy to production
-npm run deploy
+bun install
+bun run dev
+bun run test
+bun run deploy
 ```
 
-### Database Setup
+### Local Setup
+
+The whole stack runs locally — no cloud resources required except Upstash Vector
+and a Gemini key.
 
 ```bash
-# Create D1 database
-npx wrangler d1 create lumin-db
+# 1. Start Tinybird Local
+docker compose up -d
 
-# Run migrations
-npx wrangler d1 migrations apply lumin-db --remote
-
-# Initialize Tinybird data sources and pipes
-npm run tinybird:push
+# 2. Generate datafiles from the TypeScript schemas, then build against Local
+bun run tb:generate
+cd tinybird && tb build
 ```
 
+`tb build` targets whatever `dev_mode` in `tinybird/tinybird.config.json` says
+(`local`). It creates a workspace branch named after your git branch, so take
+the token from `tb token ls` — the base workspace token will authenticate but
+see no datasources.
+
+```bash
+# 3. Apply D1 migrations locally
+bunx wrangler d1 migrations apply lumin-db --local
+
+# 4. Start the worker
+bunx wrangler dev --port 8787
+
+# 5. Mint the first API key (one time)
+curl -s -X POST http://localhost:8787/api/admin/seed
+```
+
+The seed response contains an `apiKey` shown only once. Send it as `X-Api-Key`
+on every protected route.
+
+For production, create the D1 database with `bunx wrangler d1 create lumin-db`,
+apply migrations with `--remote`, and deploy Tinybird with `bun run tb:deploy`.
+
 ## Core API Endpoints
+
+Every route below requires an API key from `POST /api/admin/seed`, sent as
+`X-Api-Key` (or `X-App-Key`, or `Authorization: Bearer …`).
+
+### POST `/api/catalogs`
+
+Register a catalog describing the shape of your items. The API key resolves to a
+tenant, and a catalog belongs to that tenant.
+
+The **embed config** is the important part: it declares which fields concatenate
+into the text sent to Gemini, and which field holds the image URL. That replaces
+any hardcoded, domain-specific embedding string, and is what lets one deployment
+serve events, products, articles, or anything else.
+
+**Request Body:**
+```json
+{
+  "name": "products",
+  "fields": [
+    { "name": "brand", "type": "string" },
+    { "name": "in_stock", "type": "boolean" }
+  ],
+  "embed_config": {
+    "text_fields": ["title", "description", "brand"],
+    "image_field": "image_url"
+  }
+}
+```
+
+Field names must be lowercase identifiers, must not collide with a core item
+column (`item_id`, `title`, `description`, `tags`, `category`, `image_url`,
+`price`, `tenant_id`, `catalog_id`, `attributes`, …), and every name referenced
+by `embed_config` must be either a core column or one of your declared fields.
+
+**Response:** `201` with `catalog_id`, `name`, `fields`, `embed_config`.
+Reusing a name you already registered returns `409`.
+
+### GET `/api/catalogs`
+
+List your catalogs. Scoped to your tenant.
+
+### GET `/api/catalogs/:catalogId`
+
+Fetch one catalog. A catalog belonging to another tenant returns `404`, never
+`403` — a `403` would confirm it exists.
 
 ### GET `/get-recommendations/:userId`
 
@@ -278,7 +362,7 @@ Submit a new event to the recommendation system.
 
 **Process:**
 1. Validates event schema with Zod
-2. Generates semantic embedding (OpenAI)
+2. Generates a multimodal embedding (Gemini Embedding 2) - text fields, plus the image at `image_url` when present
 3. Starts Tinybird ingestion while the embedding is generated
 4. Stores the same caller-supplied ID in Upstash Vector and D1
 5. Queues failed Tinybird, vector, or D1 operations for idempotent retry
@@ -409,52 +493,77 @@ scheduledRecommendationUpdate()
 ## Development Scripts
 
 ```bash
-# Database migrations
-npm run db:generate    # Generate migration from schema
-npm run db:migrate     # Apply migrations to D1
-npm run db:studio      # Open Drizzle Studio
-
 # Tinybird
-npm run tinybird:push  # Deploy data sources and pipes
-npm run tinybird:pull  # Sync from remote workspace
+bun run tb:generate    # Generate .datasource/.pipe files from the TS schemas
+bun run tb:push        # Deploy generated datafiles
+bun run tb:deploy      # generate + push
+
+# Auth
+bun run auth:generate  # Regenerate Better Auth schema
+bun run auth:migrate   # Apply Better Auth migrations
 
 # Testing
-npm run test           # Run all tests
-npm run test:watch     # Watch mode
+bun run test           # Run all tests
+bun run test:watch     # Watch mode
+bun run coverage       # Coverage report
 
 # Deployment
-npm run deploy         # Deploy to Cloudflare Workers
+bun run dev            # Local worker
+bun run deploy         # Deploy to Cloudflare Workers
+bun run cf-typegen     # Regenerate binding types
+```
+
+D1 migrations are applied with wrangler directly:
+
+```bash
+bunx wrangler d1 migrations apply lumin-db --local
 ```
 
 ## Project Structure
 
 ```
 src/
-├── routes/           # API endpoint handlers
+├── routes/                    # API endpoint handlers
 │   ├── recommendations.ts
 │   ├── interactions.ts
 │   ├── events.ts
-│   └── search.ts
-├── services/         # Core business logic
-│   ├── recommendations.ts   # Hybrid vector computation
-│   ├── exploration.ts       # Exploration strategies
-│   ├── vectorization.ts     # OpenAI embeddings
-│   └── compensation.ts      # Event sourcing
-├── db/               # Database clients and schemas
-│   ├── drizzle/      # D1 schema (Drizzle ORM)
-│   ├── tinybird/     # Tinybird queries and pipes
-│   └── upstash.ts    # Vector database client
-├── middleware/       # Hono middleware
-│   ├── ratelimit.ts
-│   ├── auth.ts
-│   └── cors.ts
-├── config/           # Configuration constants
-│   └── index.ts      # Weights, limits, A/B test config
-├── utils/            # Utility functions
-│   ├── logger.ts
-│   ├── metrics.ts
-│   └── helpers.ts
-└── index.ts          # Worker entry point
+│   ├── search.ts
+│   └── catalogs.ts            # Catalog registration
+├── services/                  # Core business logic
+│   ├── recommendations.ts     # Hybrid vector computation
+│   ├── exploration.ts         # Exploration strategies
+│   ├── embedding.ts           # Gemini Embedding 2 client
+│   ├── vector.ts              # Embedding generation, Upstash reads
+│   ├── eventService.ts        # Ingestion orchestration
+│   ├── event-storage.ts       # D1 and vector persistence
+│   ├── catalogs.ts            # Tenant-scoped catalog storage
+│   ├── compensation.ts        # Retry queue for partial failures
+│   ├── observability.ts       # Logging, metrics, timing
+│   └── scheduled.ts           # Cron handlers
+├── db/schema/                 # Drizzle schemas (D1)
+│   ├── catalogs.ts            # tenants, catalogs
+│   ├── auth.ts                # Better Auth tables
+│   ├── events.ts
+│   ├── interactions.ts
+│   └── user-profiles.ts
+├── lib/
+│   ├── clients.ts             # Upstash Vector client
+│   ├── auth.ts                # Better Auth setup
+│   ├── tinybird.ts            # Ingestion endpoints
+│   └── tinybird-pipes.ts      # Pipe definitions
+├── middleware/
+│   ├── auth.ts                # requireApiKey
+│   └── tenant.ts              # resolveTenant, requireCatalog
+├── validation/                # Zod schemas
+│   ├── catalog-schemas.ts
+│   └── tinybird-schemas.ts    # TinyKit datasource definitions
+├── config/index.ts            # Weights, limits, A/B test config
+├── utils/index.ts             # Error handling, retry
+└── index.ts                   # Worker entry point
+
+migrations/                    # D1 migrations
+tinybird/                      # Generated datafiles + tb config
+docs/superpowers/              # Design specs and implementation plans
 ```
 
 ## Performance Characteristics
@@ -463,12 +572,12 @@ src/
 - **Cache Hit**: < 50ms (KV lookup)
 - **Cache Miss**: 200-800ms (vector search + computation)
 - **Ingestion**: < 1s (parallel writes with compensation)
-- **Vector Dimensions**: 1536 (OpenAI text-embedding-3-small)
+- **Vector Dimensions**: 1536 (Gemini Embedding 2, truncated from 3072 via MRL; returned unit-normalized)
 - **Recommendation List Size**: 20 items (configurable)
 
 ## Roadmap
 
-- [ ] Multi-modal embeddings (images, audio)
+- [x] Multi-modal embeddings (text + images)
 - [ ] Graph-based collaborative filtering
 - [ ] Contextual bandits for exploration
 - [ ] Real-time feedback loops
