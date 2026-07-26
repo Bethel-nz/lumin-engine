@@ -9,7 +9,6 @@
   "vars": {
     "VECTOR_URL": "",
     "VECTOR_TOKEN": "",
-    "X_APP_KEY": "",
     "GEMINI_API_KEY": "your-gemini-api-key",
     "TINYBIRD_TOKEN": "",
     "TINYBIRD_BASE_URL": "https://api.tinybird.co",
@@ -25,10 +24,6 @@
     {
       "binding": "CACHE",
       "id": "your_kv_namespace_id"
-    },
-    {
-      "binding": "TAG_VECTORS_KV",
-      "id": "your_tag_vectors_kv_namespace_id"
     }
   ],
   "d1_databases": [
@@ -41,8 +36,5 @@
   ],
   "observability": {
     "enabled": true
-  },
-  "triggers": {
-    "crons": ["*/5 * * * *", "*/30 * * * *", "0 * * * *"]
   }
 }

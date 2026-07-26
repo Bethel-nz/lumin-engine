@@ -15,6 +15,11 @@ export const getAuth = (db: D1Database) => {
         defaultPrefix: "lum_",
         minimumPrefixLength: 4,
         maximumPrefixLength: 16,
+        rateLimit: {
+          enabled: true,
+          timeWindow: 60_000,
+          maxRequests: 1_000,
+        },
       }),
     ],
     rateLimit: {

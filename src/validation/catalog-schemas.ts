@@ -17,6 +17,16 @@ export const CORE_ITEM_FIELDS = [
   'prototype',
 ] as const;
 
+export const EMBEDDABLE_CORE_ITEM_FIELDS = [
+  'item_id',
+  'title',
+  'description',
+  'tags',
+  'category',
+  'image_url',
+  'price',
+] as const;
+
 const IDENTIFIER_REGEX = /^[a-z][a-z0-9_]*$/;
 
 export const catalogFieldSchema = z.object({
@@ -52,7 +62,7 @@ export const createCatalogSchema = z.object({
 }).refine(
   (data) => {
     const validFields = new Set([
-      ...CORE_ITEM_FIELDS,
+      ...EMBEDDABLE_CORE_ITEM_FIELDS,
       ...data.fields.map((f) => f.name),
     ]);
     const textFieldsValid = data.embed_config.text_fields.every((field) =>
@@ -65,7 +75,7 @@ export const createCatalogSchema = z.object({
   },
   (data) => {
     const validFields = new Set([
-      ...CORE_ITEM_FIELDS,
+      ...EMBEDDABLE_CORE_ITEM_FIELDS,
       ...data.fields.map((f) => f.name),
     ]);
     const invalidTextFields = data.embed_config.text_fields.filter(

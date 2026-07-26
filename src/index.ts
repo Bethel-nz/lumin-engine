@@ -4,10 +4,6 @@ import { cors } from 'hono/cors';
 import { CONFIG } from './config';
 import { getAuth, getOrCreateAdminUser } from './lib/auth';
 import { requireApiKey } from './middleware/auth';
-import { ingestEventRoute } from './routes/events';
-import { logInteractionRoute } from './routes/interactions';
-import { getRecommendationsRoute } from './routes/recommendations';
-import { searchRoute } from './routes/search';
 import {
   createCatalogRoute,
   getCatalogRoute,
@@ -15,10 +11,13 @@ import {
 } from './routes/catalogs';
 import { requireCatalog, resolveTenant } from './middleware/tenant';
 import {
-  scheduledRecommendationUpdate,
-  scheduledTagVectorUpdate,
-} from './services/scheduled';
-import { processCompensationQueue } from './services/compensation';
+  getCatalogItemRoute,
+  ingestCatalogItemRoute,
+  listCatalogItemsRoute,
+  logCatalogInteractionRoute,
+  recommendCatalogItemsRoute,
+  searchCatalogRoute,
+} from './routes/recommendation-api';
 import type { AppVariables, EnvBindings } from './types';
 
 export const app = new Hono<{ Bindings: EnvBindings; Variables: AppVariables }>();
@@ -81,6 +80,11 @@ app.on(['POST', 'GET'], '/api/auth/*', (c) => {
 
 // One-time admin seed: creates the first admin user + API key
 app.post('/api/admin/seed', async (c) => {
+  const hostname = new URL(c.req.url).hostname;
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
   const auth = getAuth(c.env.DB);
   const adminUserId = await getOrCreateAdminUser(c.env.DB);
 
@@ -90,20 +94,18 @@ app.post('/api/admin/seed', async (c) => {
     .bind(adminUserId)
     .first<{ id: string }>();
 
-  if (existing) {
-    return c.json({ message: 'Admin already seeded.', adminUserId });
-  }
-
   const key = await auth.api.createApiKey({
     body: {
       userId: adminUserId,
-      name: 'admin-key',
+      name: existing ? `local-demo-${Date.now()}` : 'admin-key',
       expiresIn: null,
     },
   });
 
   return c.json({
-    message: 'Admin seeded successfully',
+    message: existing
+      ? 'A new local demo key was created.'
+      : 'Admin seeded successfully',
     adminUserId,
     apiKey: key.key,
     warning: 'Store this key securely. It will not be shown again.',
@@ -112,12 +114,6 @@ app.post('/api/admin/seed', async (c) => {
 
 // Public routes
 app.get('/', (c) => c.text('Welcome to Lumin Recommendation Service!'));
-
-// Protected API routes
-app.get('/get-recommendations/:userId', requireApiKey, userRateLimiter, getRecommendationsRoute);
-app.post('/ingest-event', requireApiKey, ingestEventRoute);
-app.post('/log-interactions', requireApiKey, logInteractionRoute);
-app.get('/search', requireApiKey, searchRoute);
 
 app.post('/api/catalogs', requireApiKey, resolveTenant, createCatalogRoute);
 app.get('/api/catalogs', requireApiKey, resolveTenant, listCatalogsRoute);
@@ -129,23 +125,48 @@ app.get(
   getCatalogRoute
 );
 
-export default {
-  fetch: app.fetch,
-  scheduled: async (
-    controller: ScheduledController,
-    env: EnvBindings,
-    ctx: ExecutionContext
-  ): Promise<void> => {
-    if (controller.cron === '*/5 * * * *') {
-      ctx.waitUntil(processCompensationQueue(env));
-    }
+app.post(
+  '/api/catalogs/:catalogId/items',
+  requireApiKey,
+  resolveTenant,
+  requireCatalog,
+  ingestCatalogItemRoute
+);
+app.get(
+  '/api/catalogs/:catalogId/items',
+  requireApiKey,
+  resolveTenant,
+  requireCatalog,
+  listCatalogItemsRoute
+);
+app.get(
+  '/api/catalogs/:catalogId/items/:itemId',
+  requireApiKey,
+  resolveTenant,
+  requireCatalog,
+  getCatalogItemRoute
+);
+app.post(
+  '/api/catalogs/:catalogId/interactions',
+  requireApiKey,
+  resolveTenant,
+  requireCatalog,
+  logCatalogInteractionRoute
+);
+app.get(
+  '/api/catalogs/:catalogId/search',
+  requireApiKey,
+  resolveTenant,
+  requireCatalog,
+  searchCatalogRoute
+);
+app.get(
+  '/api/catalogs/:catalogId/users/:userId/recommendations',
+  requireApiKey,
+  userRateLimiter,
+  resolveTenant,
+  requireCatalog,
+  recommendCatalogItemsRoute
+);
 
-    if (controller.cron === '*/30 * * * *') {
-      ctx.waitUntil(scheduledTagVectorUpdate(env, ctx));
-    }
-
-    if (controller.cron === '0 * * * *') {
-      ctx.waitUntil(scheduledRecommendationUpdate(env, ctx));
-    }
-  },
-};
+export default app;

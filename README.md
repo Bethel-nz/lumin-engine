@@ -1,599 +1,326 @@
 # Lumin Engine
 
-> **[experimental]** A real-time, hybrid recommendation engine for personalized event discovery at the edge.
+Lumin is a tenant-isolated recommendation service for products that need
+personalized discovery without building their own embedding, ranking, and
+behavioral-learning infrastructure.
 
-Lumin is a production-grade recommendation service built to power deeply personalized discovery experiences. It combines semantic understanding, collaborative filtering, behavioral analytics, and contextual signals to deliver relevant, diverse, and serendipitous recommendations in real-time.
+A tenant registers a catalog, describes its domain-specific fields, and chooses
+which fields should shape an item's embedding. The same Lumin deployment can
+then serve movies, books, products, articles, listings, or events without a
+schema deployment.
 
-Unlike traditional recommendation systems, Lumin operates entirely at the edge, uses a multi-database architecture for optimal performance, and continuously adapts to user behavior through exploration strategies and A/B testing.
+## What it does
 
-## Origin Story
+- Registers multiple catalogs per tenant.
+- Accepts arbitrary catalog fields through a validated `attributes` object.
+- Generates 1536-dimensional text or image-aware embeddings with Gemini
+  Embedding 2.
+- Isolates every catalog in its own Upstash Vector namespace.
+- Records weighted positive and negative user interactions.
+- Recomputes a time-decayed taste vector after each interaction.
+- Serves cold-start popularity results and personalized vector results through
+  the same endpoint.
+- Provides hybrid search by fusing semantic Upstash results with an immediate
+  D1 lexical lookup.
+- Streams catalog-scoped item and interaction data into Tinybird for real-time
+  analytics.
 
-Lumin was originally built as the recommendation backend for [Synaxis](https://github.com/vyr-e/synaxis), a community events discovery platform. During development, I realized the recommendation engine had evolved into something that could be useful beyond just events—it could recommend articles, products, music, or any content with descriptive metadata.
+## Architecture
 
-Rather than keeping it tightly coupled to the main platform (which, admittedly, I got a bit lazy building out), I decided to extract it into a standalone, item-agnostic service that others could use and learn from. The "experimental" tag reflects its origin as a learning project and the ongoing refinement of its hybrid algorithms—but it's battle-tested with real event data and production-ready architecture.
+```text
+API key
+  └── tenant
+      └── catalog
+          ├── D1
+          │   ├── catalog registry
+          │   ├── item read model
+          │   └── scoped interaction history
+          ├── Upstash Vector namespace: tenant_id:catalog_id
+          ├── Tinybird
+          │   ├── items__v1
+          │   ├── interactions__v1
+          │   └── catalog-scoped analytics pipes
+          └── Cloudflare KV recommendation cache
+```
 
-Think of it as an open-source alternative to traditional recommendation systems, built for developers who want full control over their discovery experience without vendor lock-in.
+The tenant and catalog are resolved before an item, interaction, search, or
+recommendation handler runs. A catalog owned by another tenant returns `404`,
+so the API does not reveal that it exists.
 
-## Current State
+## Search consistency
 
-The engine is mid-migration from event-specific to domain-agnostic. What exists
-today:
+Upstash provides semantic retrieval, but a newly written vector can briefly be
+absent from a similarity query. Lumin does not pretend that retrying blindly is
+a consistency model.
 
-- **Done** — Gemini Embedding 2 multimodal embeddings (text + image), and the
-  tenancy layer: an API key resolves to a tenant, and tenants register catalogs
-  describing their own item shape via `/api/catalogs`.
-- **Next** — the generic `items__v1` model with a JSON attributes bag, per-tenant
-  Upstash vector namespacing, and a generic pipe surface. Ingestion, search and
-  recommendations still speak `event` until that lands.
+Search therefore runs two catalog-scoped paths concurrently:
 
-See [docs/superpowers/specs](docs/superpowers/specs) for the design and
-[docs/superpowers/plans](docs/superpowers/plans) for the implementation plans.
+1. Gemini query embedding → Upstash semantic search.
+2. Immediate D1 lexical search over title, description, tags, category, and
+   attributes.
 
-> **Known gap:** `/ingest-event`, `/log-interactions`, `/search` and
-> `/get-recommendations/:userId` authenticate but are **not** tenant-scoped yet —
-> there is one un-namespaced vector index and no tenant column on events. Do not
-> issue a second API key against real data until the item model lands.
+The results are merged by item ID and ranked with a `75% semantic / 25% lexical`
+score. The lexical path gives newly ingested and exact-match items immediate
+visibility; the semantic path handles intent and conceptual similarity. D1
+`LIKE` is deliberately the first implementation. A catalog-scoped FTS index is
+the next step when measured catalog size makes it worthwhile.
 
-## Core Concepts
+## Recommendation loop
 
-### The Hybrid Recommendation Approach
+Interaction weights are intentionally domain-neutral:
 
-Lumin builds a multi-dimensional understanding of each user by combining:
+| Action | Weight |
+| --- | ---: |
+| `complete` | 3.0 |
+| `purchase` | 3.0 |
+| `like` | 2.0 |
+| `save` | 1.5 |
+| `click` | 1.0 |
+| `view` | 0.25 |
+| `dismiss` | -1.0 |
+| `dislike` | -2.0 |
 
-1. **Content-Based Filtering (50%)** - Semantic similarity using vector embeddings of event descriptions, titles, and tags
-2. **Tag Preferences (30%)** - Explicit user preferences captured through tag selection
-3. **Collaborative Filtering (20%)** - Learning from similar users' interactions and preferences  
-4. **Demographic Context (10%)** - Incorporating location, interests, and user attributes
+Lumin fetches the vectors for a user's interacted items, applies each action
+weight and exponential time decay, then normalizes the result into the user's
+current taste vector. Items the user already interacted with are removed from
+the candidate set.
 
-These signals are weighted and merged into a single "taste vector" that powers real-time similarity search.
+With no usable signal, the endpoint returns catalog popularity ordered by
+weighted interactions. Once the user interacts, the same endpoint switches to
+the personalized strategy and reports how many interactions informed it.
 
-### Exploration vs. Exploitation
-
-The engine balances **exploitation** (showing known good recommendations) with **exploration** (discovering new interests):
-
-- **Adaptive Exploration Rate**: Starts at 40% for new users, decreases to 15% as they interact more
-- **Multi-Strategy Exploration**: Injects trending items, serendipitous picks, and anti-correlated recommendations
-- **Engagement Tracking**: Doubles exploration rate if user engagement drops below 30%
-
-### Real-Time Adaptation
-
-Every interaction updates the system immediately:
-- Recommendations are invalidated and recomputed
-- User taste vectors decay over time (exponential decay)
-- Recent interactions carry more weight than historical ones
-- Background jobs pre-compute aggregate signals every 30 minutes
-
-## Tech Stack
+## Stack
 
 | Layer | Technology |
-|-------|-----------|
-| **Edge Runtime** | Cloudflare Workers |
-| **Web Framework** | Hono |
-| **Vector Database** | Upstash Vector (1536-dim embeddings) |
-| **Relational Database** | Cloudflare D1 (SQLite) + Drizzle ORM |
-| **Analytics Engine** | Tinybird (real-time data pipes) |
-| **Cache Layer** | Cloudflare KV |
-| **Embeddings Model** | Gemini Embedding 2 (multimodal, 1536-dim) |
-| **Auth** | Better Auth + API key plugin |
-| **Validation** | Zod |
-| **Testing** | Vitest |
+| --- | --- |
+| Runtime | Cloudflare Workers |
+| HTTP | Hono |
+| Authentication | Better Auth API keys |
+| Relational state | Cloudflare D1 + Drizzle |
+| Vector retrieval | Upstash Vector |
+| Analytics | Tinybird + TinyKit |
+| Cache | Cloudflare KV |
+| Embeddings | Gemini Embedding 2 |
+| Validation | Zod |
 
-## Architecture Overview
+## Local setup
 
-```
-┌─────────────────┐
-│  User Request   │
-└────────┬────────┘
-         │
-         v
-┌──────────────────────────────────────────┐
-│  Cloudflare Workers (Hono Router)        │
-│  • Rate Limiting                         │
-│  • CORS + Auth                           │
-│  • Cache Check (KV)                      │
-└──────────┬───────────────────────────────┘
-           │
-           v
-┌──────────────────────────────────────────┐
-│  Hybrid Vector Computation               │
-│  • Fetch user interactions (D1)          │
-│  • Load interaction vectors (Upstash)    │
-│  • Generate tag embeddings (Gemini)      │
-│  • Apply collaborative filtering (D1)    │
-│  • Blend with demographics (Gemini)      │
-└──────────┬───────────────────────────────┘
-           │
-           v
-┌──────────────────────────────────────────┐
-│  Vector Similarity Search (Upstash)      │
-│  • Query top 200 candidates              │
-│  • Apply tag filtering (if applicable)   │
-│  • A/B test: diversification strategy    │
-└──────────┬───────────────────────────────┘
-           │
-           v
-┌──────────────────────────────────────────┐
-│  Exploration Injection                   │
-│  • Trending events (Tinybird)            │
-│  • Serendipity items (uncommon tags)     │
-│  • Anti-correlated picks (inverse vec)   │
-└──────────┬───────────────────────────────┘
-           │
-           v
-┌──────────────────────────────────────────┐
-│  Cache Result → Return to User           │
-└──────────────────────────────────────────┘
-```
+Requirements:
 
-### Data Persistence Strategy
+- Bun
+- Docker
+- Tinybird CLI
+- Gemini API key
+- Upstash Vector index
 
-**Upstash Vector** → Semantic search and vector operations  
-**Cloudflare D1** → Relational data, user profiles, interaction history  
-**Tinybird** → Real-time analytics, trending events, behavioral patterns  
-**Cloudflare KV** → Distributed caching, user preferences, A/B test groups
-
-## Getting Started
-
-### Prerequisites
-
-- **Node.js 18+** or **Bun**
-- **Cloudflare Workers** account
-- **Upstash Vector** database
-- **Tinybird** workspace
-- **Google AI** API key (Gemini)
-
-### Environment Setup
-
-Create a `.dev.vars` file for local development:
+Create `.dev.vars`:
 
 ```env
-# Vector Database
-VECTOR_URL=your_upstash_vector_url
-VECTOR_TOKEN=your_upstash_vector_token
-
-# AI Embeddings
-GEMINI_API_KEY=your_google_ai_api_key
-
-# Analytics
-TINYBIRD_TOKEN=your_tinybird_token
-# Tinybird Local runs on http://localhost:7181; use https://api.tinybird.co for cloud
 TINYBIRD_BASE_URL=http://localhost:7181
-
-# Authentication
-BETTER_AUTH_SECRET=generate_with_openssl_rand_base64_32
+TINYBIRD_TOKEN=<token printed by `tb info` after build>
+GEMINI_API_KEY=<google ai key>
+VECTOR_URL=<upstash vector REST URL>
+VECTOR_TOKEN=<upstash vector REST token>
+BETTER_AUTH_SECRET=<random 32-byte secret>
 BETTER_AUTH_URL=http://localhost:8787
-
-# Optional: Monitoring
-MONITORING_ENDPOINT=https://...
-MONITORING_TOKEN=...
-METRICS_ENDPOINT=https://...
-METRICS_TOKEN=...
-ALERTS_WEBHOOK=https://...
 ```
 
-`wrangler.jsonc` is gitignored. Copy `wrangler.jsonc.template` and fill in:
-- D1 database binding (`DB`)
-- KV namespace bindings (`CACHE`, `TAG_VECTORS_KV`)
-- `account_id` and any production vars
-
-### Development
+Start and build Tinybird Local:
 
 ```bash
-bun install
-bun run dev
-bun run test
-bun run deploy
-```
-
-### Local Setup
-
-The whole stack runs locally — no cloud resources required except Upstash Vector
-and a Gemini key.
-
-```bash
-# 1. Start Tinybird Local
 docker compose up -d
-
-# 2. Generate datafiles from the TypeScript schemas, then build against Local
+bun install
 bun run tb:generate
-cd tinybird && tb build
+cd tinybird
+tb build
+tb info
+cd ..
 ```
 
-`tb build` targets whatever `dev_mode` in `tinybird/tinybird.config.json` says
-(`local`). It creates a workspace branch named after your git branch, so take
-the token from `tb token ls` — the base workspace token will authenticate but
-see no datasources.
+The local build can use a temporary Tinybird workspace. Use the `token:` value
+reported by `tb info`; a token from `/tokens` may belong to a different
+workspace and return `404` for a datasource that was built successfully.
+
+Apply D1 migrations and start the Worker:
 
 ```bash
-# 3. Apply D1 migrations locally
 bunx wrangler d1 migrations apply lumin-db --local
-
-# 4. Start the worker
 bunx wrangler dev --port 8787
-
-# 5. Mint the first API key (one time)
-curl -s -X POST http://localhost:8787/api/admin/seed
 ```
 
-The seed response contains an `apiKey` shown only once. Send it as `X-Api-Key`
-on every protected route.
+## Movie demo
 
-For production, create the D1 database with `bunx wrangler d1 create lumin-db`,
-apply migrations with `--remote`, and deploy Tinybird with `bun run tb:deploy`.
+The included seed creates one movie catalog and twelve fictional films:
 
-## Core API Endpoints
+```bash
+bun run seed:movies
+```
 
-Every route below requires an API key from `POST /api/admin/seed`, sent as
-`X-Api-Key` (or `X-App-Key`, or `Authorization: Bearer …`).
+The command creates a local-only API key, prints the catalog ID, and ingests the
+movies through the real HTTP API. The local seed endpoint returns `404` on any
+non-local hostname.
 
-### POST `/api/catalogs`
+Use the returned API key as `X-Api-Key`.
 
-Register a catalog describing the shape of your items. The API key resolves to a
-tenant, and a catalog belongs to that tenant.
+```bash
+curl \
+  -H "X-Api-Key: $LUMIN_API_KEY" \
+  "http://localhost:8787/api/catalogs/$CATALOG_ID/items"
+```
 
-The **embed config** is the important part: it declares which fields concatenate
-into the text sent to Gemini, and which field holds the image URL. That replaces
-any hardcoded, domain-specific embedding string, and is what lets one deployment
-serve events, products, articles, or anything else.
+Log a preference:
 
-**Request Body:**
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $LUMIN_API_KEY" \
+  "http://localhost:8787/api/catalogs/$CATALOG_ID/interactions" \
+  -d '{
+    "user_id": "demo-user",
+    "item_id": "signal-beyond",
+    "action": "like",
+    "session_id": "demo-session"
+  }'
+```
+
+Fetch the learned recommendations:
+
+```bash
+curl \
+  -H "X-Api-Key: $LUMIN_API_KEY" \
+  "http://localhost:8787/api/catalogs/$CATALOG_ID/users/demo-user/recommendations"
+```
+
+## API
+
+All `/api/catalogs/**` routes require an API key.
+
+### Register a catalog
+
+`POST /api/catalogs`
+
 ```json
 {
-  "name": "products",
+  "name": "books",
   "fields": [
-    { "name": "brand", "type": "string" },
-    { "name": "in_stock", "type": "boolean" }
+    { "name": "author", "type": "string" },
+    { "name": "year", "type": "number" },
+    { "name": "themes", "type": "string[]" }
   ],
   "embed_config": {
-    "text_fields": ["title", "description", "brand"],
+    "text_fields": [
+      "title",
+      "description",
+      "tags",
+      "author",
+      "themes"
+    ],
     "image_field": "image_url"
   }
 }
 ```
 
-Field names must be lowercase identifiers, must not collide with a core item
-column (`item_id`, `title`, `description`, `tags`, `category`, `image_url`,
-`price`, `tenant_id`, `catalog_id`, `attributes`, …), and every name referenced
-by `embed_config` must be either a core column or one of your declared fields.
+Supported custom field types are `string`, `number`, `boolean`, and `string[]`.
+Every attribute supplied during ingestion must be declared by the catalog.
 
-**Response:** `201` with `catalog_id`, `name`, `fields`, `embed_config`.
-Reusing a name you already registered returns `409`.
+### Ingest or update an item
 
-### GET `/api/catalogs`
+`POST /api/catalogs/:catalogId/items`
 
-List your catalogs. Scoped to your tenant.
-
-### GET `/api/catalogs/:catalogId`
-
-Fetch one catalog. A catalog belonging to another tenant returns `404`, never
-`403` — a `403` would confirm it exists.
-
-### GET `/get-recommendations/:userId`
-
-Get personalized event recommendations for a user.
-
-**Rate Limit:** 50 requests per 15 minutes per user  
-**Cache TTL:** 30 minutes
-
-**Response:**
 ```json
 {
-  "recommendations": [
-    {
-      "event_id": "event_123",
-      "score": 0.89,
-      "diversified": false
-    }
-  ],
-  "metadata": {
-    "user_id": "user_456",
-    "ab_group": "A",
-    "exploration_rate": 0.25,
-    "total_candidates": 42,
-    "cache_hit": false
+  "item_id": "book-42",
+  "title": "A Map of Small Decisions",
+  "description": "A reflective novel about cities, memory, and friendship.",
+  "tags": ["literary", "city", "friendship"],
+  "category": "fiction",
+  "image_url": "https://example.com/cover.jpg",
+  "price": 14.99,
+  "attributes": {
+    "author": "M. Nwosu",
+    "year": 2025,
+    "themes": ["memory", "belonging"]
   }
 }
 ```
 
-### POST `/log-interactions`
+The caller's `item_id` is the idempotency key across D1, Upstash, and Tinybird.
 
-Log user interactions to update taste profiles in real-time.
+### List and fetch items
 
-**Rate Limit:** 100 requests per 15 minutes globally
+- `GET /api/catalogs/:catalogId/items?limit=50`
+- `GET /api/catalogs/:catalogId/items/:itemId`
 
-**Request Body:**
+### Record an interaction
+
+`POST /api/catalogs/:catalogId/interactions`
+
 ```json
 {
-  "id": "interaction_01JXYZ",
-  "user_id": "user_456",
-  "event_id": "event_123",
-  "action": "view" | "click" | "like" | "dislike" | "select_tags" | "signup",
-  "session_id": "session_123",
+  "id": "optional-caller-idempotency-key",
+  "user_id": "user-7",
+  "item_id": "book-42",
+  "action": "complete",
+  "session_id": "session-9",
   "source": "web",
-  "tags": ["optional", "for", "select_tags"]
+  "duration_ms": 420000
 }
 ```
 
-`id` is supplied by the caller and is the idempotency key for the interaction.
-The same ID is reused in D1 and Tinybird, so safely retrying a request does not
-teach the recommendation model twice.
+If `id` is omitted, Lumin generates one. Reusing an ID is safe in D1.
 
-**Action Weights:**
-- `select_tags`: 5.0 (highest signal)
-- `like`: 2.0
-- `click`: 1.0
-- `view`: 0.5
-- `dislike`: -1.0 (negative signal)
-- `signup`: 0.0 (tracked but neutral)
+### Hybrid search
 
-**Response:**
-```json
-{
-  "success": true,
-  "interaction_id": "interaction_01JXYZ",
-  "message": "Interaction logged for user user_456"
-}
-```
+`GET /api/catalogs/:catalogId/search?query=quiet+space+mystery&limit=20`
 
-### POST `/ingest-event`
+Each result includes its combined score, semantic and lexical component scores,
+and the sources that produced it.
 
-Submit a new event to the recommendation system.
+### Recommendations
 
-**Rate Limit:** 100 requests per 15 minutes globally
+`GET /api/catalogs/:catalogId/users/:userId/recommendations?limit=20`
 
-**Request Body:**
-```json
-{
-  "id": "event_789",
-  "title": "Summer Music Festival 2025",
-  "description": "A three-day outdoor music festival featuring indie and electronic artists.",
-  "tags": ["music", "festival", "outdoor"],
-  "host": "City Events Co",
-  "category": "entertainment",
-  "location": "San Francisco, CA",
-  "event_date": 1752602400000,
-  "metadata": {
-    "url": "https://example.com/events/789",
-    "image_url": "https://example.com/images/789.jpg",
-    "price": "50-120"
-  }
-}
-```
+The response metadata reports `popular` or `personalized`,
+`learned_from_interactions`, and cache state.
 
-**Process:**
-1. Validates event schema with Zod
-2. Generates a multimodal embedding (Gemini Embedding 2) - text fields, plus the image at `image_url` when present
-3. Starts Tinybird ingestion while the embedding is generated
-4. Stores the same caller-supplied ID in Upstash Vector and D1
-5. Queues failed Tinybird, vector, or D1 operations for idempotent retry
+## Tinybird resources
 
-**Response:**
-```json
-{
-  "success": true,
-  "event_id": "event_789",
-  "message": "Event \"Summer Music Festival 2025\" ingested.",
-  "tinybird_response": {}
-}
-```
+TinyKit generates:
 
-### GET `/search?query=<text>`
+- `items__v1`
+- `interactions__v1`
+- `trending_items__v1`
+- `realtime_trending__v1`
+- `user_behavior__v1`
+- `item_similarity__v1`
+- `facet_trends__v1`
 
-Perform semantic search over all events.
+Every datasource sorting key and every pipe predicate begins with
+`tenant_id, catalog_id`.
 
-**Rate Limit:** 100 requests per 15 minutes globally
-
-**Query Parameters:**
-- `query` (required): Natural language search query
-- `limit` (optional): Number of results (default: 20, max: 50)
-
-**Response:**
-```json
-{
-  "results": [
-    {
-      "id": "event_123",
-      "title": "Tech Meetup: AI and Ethics",
-      "tags": ["technology", "ai", "ethics"],
-      "score": 0.91
-    }
-  ],
-  "query": "artificial intelligence discussions"
-}
-```
-
-## Recommendation Algorithm Details
-
-### Hybrid Vector Formula
-
-```
-User Vector = 0.5 × Interaction Vector
-            + 0.3 × Tag Preference Vector
-            + 0.2 × Collaborative Vector
-            + 0.1 × Demographics Vector
-```
-
-### Time Decay Function
-
-Recent interactions are weighted more heavily:
-
-```
-Weight(t) = base_weight × e^(-0.1 × days_ago)
-```
-
-### Exploration Rate Calculation
-
-```
-exploration_rate = max(0.15, 0.4 - interaction_count × 0.01)
-
-if engagement_rate < 0.3:
-    exploration_rate *= 2
-```
-
-### A/B Test Groups
-
-**Group A** (50% of users):
-- Initial top-K: 40 candidates
-- Diversification: ON (80/20 split between top and tail candidates)
-
-**Group B** (50% of users):
-- Initial top-K: 50 candidates
-- Diversification: OFF (pure ranking)
-
-### Exploration Injection Slots
-
-Trending, serendipitous, or anti-correlated items are injected at positions **[2, 5, 8]** in the recommendation list.
-
-## Scheduled Background Jobs
-
-### Tag Vector Updates (Every 30 minutes)
-
-```typescript
-// Recomputes aggregate vectors for active tags
-// Uses exponential moving average (learning rate: 0.1)
-scheduledTagVectorUpdate()
-```
-
-### Recommendation Pre-computation (Every 1 hour)
-
-```typescript
-// Pre-computes and caches recommendations for active users
-// Reduces latency on first request
-scheduledRecommendationUpdate()
-```
-
-## Security & Rate Limiting
-
-- **API Key Authentication**: Custom `X-App-Key` header required
-- **CORS**: Enabled for `localhost:3000` and `https://synaxis-app.vercel.app`
-- **Rate Limiting**: Sliding window algorithm with KV-based counters
-- **Input Validation**: Zod schemas for all endpoints
-- **Edge Security**: Runs on Cloudflare's secure edge network
-
-## Monitoring & Observability
-
-- **Structured Logging**: JSON logs with request context
-- **Metrics Tracking**: Success/error rates, latency, cache hit rates
-- **Compensation Queue**: Event sourcing for reliable distributed writes
-- **Retry Strategy**: Exponential backoff with jitter (max 3 retries)
-
-## Data Sources (Tinybird)
-
-### Ingestion Tables
-- `events__v1`: Event metadata and descriptions
-- `interactions__v1`: User interaction logs with timestamps
-
-### Analytics Pipes
-- `trending_events__v1`: Top events by engagement (24h window)
-- `event_similarity__v1`: Similar events based on metadata
-- `user_behavior__v1`: User preference patterns and trends
-- `realtime_trending__v1`: Real-time trending events
-- `location_trends__v1`: Geographic trending patterns
-
-## Development Scripts
+## Development commands
 
 ```bash
-# Tinybird
-bun run tb:generate    # Generate .datasource/.pipe files from the TS schemas
-bun run tb:push        # Deploy generated datafiles
-bun run tb:deploy      # generate + push
-
-# Auth
-bun run auth:generate  # Regenerate Better Auth schema
-bun run auth:migrate   # Apply Better Auth migrations
-
-# Testing
-bun run test           # Run all tests
-bun run test:watch     # Watch mode
-bun run coverage       # Coverage report
-
-# Deployment
-bun run dev            # Local worker
-bun run deploy         # Deploy to Cloudflare Workers
-bun run cf-typegen     # Regenerate binding types
-```
-
-D1 migrations are applied with wrangler directly:
-
-```bash
+bun run tb:generate
+cd tinybird && tb build
 bunx wrangler d1 migrations apply lumin-db --local
+bun run dev
+bun run seed:movies
 ```
 
-## Project Structure
+`tb build` targets local development. Production Tinybird deployment and
+Cloudflare deployment remain separate explicit operations.
 
-```
-src/
-├── routes/                    # API endpoint handlers
-│   ├── recommendations.ts
-│   ├── interactions.ts
-│   ├── events.ts
-│   ├── search.ts
-│   └── catalogs.ts            # Catalog registration
-├── services/                  # Core business logic
-│   ├── recommendations.ts     # Hybrid vector computation
-│   ├── exploration.ts         # Exploration strategies
-│   ├── embedding.ts           # Gemini Embedding 2 client
-│   ├── vector.ts              # Embedding generation, Upstash reads
-│   ├── eventService.ts        # Ingestion orchestration
-│   ├── event-storage.ts       # D1 and vector persistence
-│   ├── catalogs.ts            # Tenant-scoped catalog storage
-│   ├── compensation.ts        # Retry queue for partial failures
-│   ├── observability.ts       # Logging, metrics, timing
-│   └── scheduled.ts           # Cron handlers
-├── db/schema/                 # Drizzle schemas (D1)
-│   ├── catalogs.ts            # tenants, catalogs
-│   ├── auth.ts                # Better Auth tables
-│   ├── events.ts
-│   ├── interactions.ts
-│   └── user-profiles.ts
-├── lib/
-│   ├── clients.ts             # Upstash Vector client
-│   ├── auth.ts                # Better Auth setup
-│   ├── tinybird.ts            # Ingestion endpoints
-│   └── tinybird-pipes.ts      # Pipe definitions
-├── middleware/
-│   ├── auth.ts                # requireApiKey
-│   └── tenant.ts              # resolveTenant, requireCatalog
-├── validation/                # Zod schemas
-│   ├── catalog-schemas.ts
-│   └── tinybird-schemas.ts    # TinyKit datasource definitions
-├── config/index.ts            # Weights, limits, A/B test config
-├── utils/index.ts             # Error handling, retry
-└── index.ts                   # Worker entry point
+## Current boundaries
 
-migrations/                    # D1 migrations
-tinybird/                      # Generated datafiles + tb config
-docs/superpowers/              # Design specs and implementation plans
-```
-
-## Performance Characteristics
-
-- **Cold Start**: < 100ms (edge Workers)
-- **Cache Hit**: < 50ms (KV lookup)
-- **Cache Miss**: 200-800ms (vector search + computation)
-- **Ingestion**: < 1s (parallel writes with compensation)
-- **Vector Dimensions**: 1536 (Gemini Embedding 2, truncated from 3072 via MRL; returned unit-normalized)
-- **Recommendation List Size**: 20 items (configurable)
-
-## Roadmap
-
-- [x] Multi-modal embeddings (text + images)
-- [ ] Graph-based collaborative filtering
-- [ ] Contextual bandits for exploration
-- [ ] Real-time feedback loops
-- [ ] Multi-region vector replication
-- [ ] Item-to-item recommendations
-- [ ] Explanation generation for recommendations
+- Lexical search uses scoped D1 `LIKE`; add FTS only after catalog-size
+  measurements justify it.
+- Popularity fallback is computed from D1. Tinybird powers the richer analytics
+  surface rather than sitting in the request-critical recommendation path.
+- The previous event-specific routes are not registered. Their source remains
+  temporarily for migration history and can be deleted after downstream callers
+  have moved to the catalog API.
 
 ## License
 
 MIT
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
-
-## Architecture Diagram
-
-View the full interactive architecture diagram:  
-[Excalidraw - Lumin Architecture](https://excalidraw.com/#json=T0FgGo0V8KY4nhcWL2IHG,TX5w1r5KBh0glXcOy84EHw)

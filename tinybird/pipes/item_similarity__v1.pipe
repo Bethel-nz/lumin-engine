@@ -1,0 +1,24 @@
+NODE endpoint
+SQL >
+    %
+    SELECT item_id, argMax(title, updated_at) AS title, argMax(category, updated_at) AS category, length(arrayIntersect(argMax(tags, updated_at), (
+        SELECT argMax(tags, updated_at)
+        FROM items__v1
+        WHERE tenant_id = {{ String(tenant_id, required=True) }}
+          AND catalog_id = {{ String(catalog_id, required=True) }}
+          AND item_id = {{ String(item_id, required=True) }}
+      ))) / greatest(length(arrayDistinct(arrayConcat(argMax(tags, updated_at), (
+        SELECT argMax(tags, updated_at)
+        FROM items__v1
+        WHERE tenant_id = {{ String(tenant_id, required=True) }}
+          AND catalog_id = {{ String(catalog_id, required=True) }}
+          AND item_id = {{ String(item_id, required=True) }}
+      )))), 1) AS similarity_score
+    FROM items__v1
+    WHERE tenant_id = {{ String(tenant_id, required=True) }} AND catalog_id = {{ String(catalog_id, required=True) }} AND item_id != {{ String(item_id, required=True) }}
+    GROUP BY item_id
+    HAVING similarity_score > 0
+    ORDER BY similarity_score DESC
+    LIMIT {{ Int64(limit, 20) }}
+
+TYPE endpoint

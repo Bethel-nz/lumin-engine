@@ -7,17 +7,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "tb:generate": "tinykit generate --file src/validation/tinybird-schemas.ts --file src/lib/tinybird-pipes.ts",
+    "tb:generate": "tinykit generate --file src/validation/recommendation-tinybird-schemas.ts --file src/lib/recommendation-pipes.ts",
     "tb:push": "tinykit deploy --allow-destructive-operations",
     "tb:deploy": "bun run tb:generate && bun run tb:push",
     "auth:generate": "bun x @better-auth/cli generate",
     "auth:migrate": "bun x @better-auth/cli migrate",
-    "seed": "curl -X POST http://localhost:8787/api/admin/seed"
+    "seed": "curl -X POST http://localhost:8787/api/admin/seed",
+    "seed:movies": "bun scripts/seed-movie-demo.ts"
   },
   "dependencies": {
     "@better-auth/api-key": "^1.6.18",
     "@upstash/vector": "^1.2.3",
-    "@vyr-e/tinykit": "0.3.0",
+    "@vyr-e/tinykit": "0.3.1",
     "better-auth": "^1.6.18",
     "dotenv": "^17.4.2",
     "drizzle-orm": "0.39.3",

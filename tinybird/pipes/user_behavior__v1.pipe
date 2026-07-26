@@ -2,31 +2,35 @@ NODE endpoint
 SQL >
     %
     SELECT groupArray(category) AS preferred_categories
-        FROM
-        (
+    FROM (
           SELECT
-            any(events.category) AS category,
+            any(latest_items.category) AS category,
             count() AS interaction_count
-          FROM
-          (
-            SELECT id, any(user_id) AS user_id, any(event_id) AS event_id,
+          FROM (
+            SELECT id, any(tenant_id) AS tenant_id, any(catalog_id) AS catalog_id,
+                   any(user_id) AS user_id, any(item_id) AS item_id,
                    any(action) AS action, max(timestamp) AS timestamp
             FROM interactions__v1
             GROUP BY id
           ) AS interactions
-          INNER JOIN
-          (
-            SELECT id, argMax(category, updated_at) AS category
-            FROM events__v1
-            GROUP BY id
-          ) AS events ON events.id = interactions.event_id
-          WHERE interactions.user_id = {{ String(user_id, required=True) }}
-            AND interactions.action IN ('view', 'click', 'like')
+          INNER JOIN (
+            SELECT tenant_id, catalog_id, item_id,
+                   argMax(category, updated_at) AS category
+            FROM items__v1
+            GROUP BY tenant_id, catalog_id, item_id
+          ) AS latest_items
+            ON latest_items.tenant_id = interactions.tenant_id
+           AND latest_items.catalog_id = interactions.catalog_id
+           AND latest_items.item_id = interactions.item_id
+          WHERE interactions.tenant_id = {{ String(tenant_id, required=True) }}
+            AND interactions.catalog_id = {{ String(catalog_id, required=True) }}
+            AND interactions.user_id = {{ String(user_id, required=True) }}
+            AND interactions.action IN ('view', 'click', 'like', 'save', 'complete', 'purchase')
             AND interactions.timestamp >= toUnixTimestamp64Milli(
-              now64(3) - INTERVAL {{ Int64(days, 7) }} DAY
+              now64(3) - INTERVAL {{ Int64(days, 30) }} DAY
             )
-            AND events.category != ''
-          GROUP BY events.category
+            AND latest_items.category != ''
+          GROUP BY latest_items.category
           ORDER BY interaction_count DESC
         )
 

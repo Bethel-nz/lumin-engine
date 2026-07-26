@@ -1,0 +1,31 @@
+NODE endpoint
+SQL >
+    %
+    WITH deduped_interactions AS (SELECT id, any(tenant_id) AS tenant_id, any(catalog_id) AS catalog_id, any(item_id) AS item_id, any(action) AS action, max(timestamp) AS timestamp
+    FROM interactions__v1
+    GROUP BY id),
+    latest_items AS (SELECT tenant_id, catalog_id, item_id, argMax(title, updated_at) AS title, argMax(category, updated_at) AS category
+    FROM items__v1
+    GROUP BY tenant_id, catalog_id, item_id)
+    SELECT deduped_interactions.item_id AS item_id, any(latest_items.title) AS title, any(latest_items.category) AS category, count() AS interaction_count, sum(
+      multiIf(
+        deduped_interactions.action = 'complete', 3.0,
+        deduped_interactions.action = 'purchase', 3.0,
+        deduped_interactions.action = 'like', 2.0,
+        deduped_interactions.action = 'save', 1.5,
+        deduped_interactions.action = 'click', 1.0,
+        deduped_interactions.action = 'view', 0.25,
+        deduped_interactions.action = 'dismiss', -1.0,
+        deduped_interactions.action = 'dislike', -2.0,
+        0.0
+      )
+    ) AS engagement_score
+    FROM deduped_interactions
+    INNER JOIN latest_items ON latest_items.tenant_id = deduped_interactions.tenant_id AND latest_items.catalog_id = deduped_interactions.catalog_id AND latest_items.item_id = deduped_interactions.item_id
+    WHERE deduped_interactions.tenant_id = {{ String(tenant_id, required=True) }} AND deduped_interactions.catalog_id = {{ String(catalog_id, required=True) }} AND deduped_interactions.timestamp >= toUnixTimestamp64Milli(now64(3) - INTERVAL {{ Int64(hours, 168) }} HOUR) AND ({{ String(category, '') }} = '' OR latest_items.category = {{ String(category, '') }})
+    GROUP BY deduped_interactions.item_id
+    HAVING engagement_score > 0
+    ORDER BY engagement_score DESC, interaction_count DESC
+    LIMIT {{ Int64(limit, 20) }}
+
+TYPE endpoint

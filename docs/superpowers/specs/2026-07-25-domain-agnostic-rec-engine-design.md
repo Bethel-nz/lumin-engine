@@ -1,7 +1,7 @@
 # Domain-agnostic recommendation engine
 
 Date: 2026-07-25
-Status: design, awaiting review
+Status: implemented locally
 
 ## Problem
 
@@ -110,22 +110,27 @@ Effectively greenfield. The Tinybird workspace is empty and the Upstash index
 holds 0 vectors, so `events__v1` and the five event pipes are replaced outright
 rather than versioned alongside. There is no backfill and no dual-write window.
 
-### Merge condition: the legacy routes are not tenant-scoped
+### Legacy route removal
 
-Tenancy lands catalog-first. Until the item model and Upstash namespacing ship,
-`/ingest-event`, `/log-interactions`, `/search` and `/get-recommendations/:userId`
-authenticate with `requireApiKey` but carry no tenant concept: one un-namespaced
-Upstash index, no tenant column on events, and `:userId` accepts any value.
+The event-specific routes are no longer registered. Their replacements live
+under `/api/catalogs/:catalogId/**` and always execute
+`requireApiKey -> resolveTenant -> requireCatalog` before reaching a handler.
+Vectors use a structural `{tenant_id}:{catalog_id}` namespace, while D1 and
+Tinybird carry both identifiers on every item and interaction.
 
-Any valid API key can therefore read and write everything behind those four
-routes, while being correctly isolated from other tenants' catalogs. This is not
-a regression — it predates the registry — but the registry makes "tenant" a live
-provisioned concept, so the gap becomes reachable rather than theoretical.
+The old source remains temporarily as migration history, but no request or cron
+handler can reach it.
 
-**No second API key may be issued in an environment holding real data until the
-item model and per-tenant vector namespacing are in place.** Whoever ships that
-work owns scoping these four routes; a reviewer seeing `resolveTenant` in the
-router would otherwise reasonably assume the whole service is tenant-safe.
+## Search
+
+Search is hybrid. A Gemini query embedding drives catalog-namespaced Upstash
+semantic retrieval while D1 performs a scoped lexical lookup over the item read
+model. Results are fused by item ID with a 75/25 semantic-to-lexical score.
+
+This is also the read-after-write strategy: a newly ingested vector may briefly
+be absent from a similarity query, but its D1 row is immediately eligible for
+an exact or lexical match. Replace `LIKE` with catalog-scoped FTS only after
+measured catalog size warrants it.
 
 ## Error handling
 

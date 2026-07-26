@@ -1,6 +1,7 @@
 export interface EnvBindings {
   DB: D1Database;
   CACHE: KVNamespace;
+  /** @deprecated Legacy event scheduler binding; no longer wired at runtime. */
   TAG_VECTORS_KV: KVNamespace;
   VECTOR_URL: string;
   VECTOR_TOKEN: string;

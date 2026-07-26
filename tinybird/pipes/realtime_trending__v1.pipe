@@ -1,30 +1,26 @@
 NODE endpoint
 SQL >
     %
-    SELECT
-          event_id,
-          count() / greatest({{ Int64(minutes, 60) }}, 1) AS interaction_velocity,
-          sum(
-            multiIf(
-              action = 'like', 2.0,
-              action = 'click', 1.0,
-              action = 'view', 0.5,
-              action = 'dislike', -1.0,
-              0.0
-            )
-          ) AS engagement_score
-        FROM
-        (
-          SELECT id, any(event_id) AS event_id, any(action) AS action,
-                 max(timestamp) AS timestamp
-          FROM interactions__v1
-          GROUP BY id
-        )
-        WHERE timestamp >= toUnixTimestamp64Milli(
-          now64(3) - INTERVAL {{ Int64(minutes, 60) }} MINUTE
-        )
-        GROUP BY event_id
-        ORDER BY engagement_score DESC, interaction_velocity DESC
-        LIMIT {{ Int64(limit, 10) }}
+    WITH deduped_interactions AS (SELECT id, any(tenant_id) AS tenant_id, any(catalog_id) AS catalog_id, any(item_id) AS item_id, any(action) AS action, max(timestamp) AS timestamp
+    FROM interactions__v1
+    GROUP BY id)
+    SELECT item_id, count() / greatest({{ Int64(minutes, 60) }}, 1) AS interaction_velocity, sum(
+      multiIf(
+        action = 'complete', 3.0,
+        action = 'purchase', 3.0,
+        action = 'like', 2.0,
+        action = 'save', 1.5,
+        action = 'click', 1.0,
+        action = 'view', 0.25,
+        action = 'dismiss', -1.0,
+        action = 'dislike', -2.0,
+        0.0
+      )
+    ) AS engagement_score
+    FROM deduped_interactions
+    WHERE tenant_id = {{ String(tenant_id, required=True) }} AND catalog_id = {{ String(catalog_id, required=True) }} AND timestamp >= toUnixTimestamp64Milli(now64(3) - INTERVAL {{ Int64(minutes, 60) }} MINUTE)
+    GROUP BY item_id
+    ORDER BY engagement_score DESC, interaction_velocity DESC
+    LIMIT {{ Int64(limit, 20) }}
 
 TYPE endpoint
