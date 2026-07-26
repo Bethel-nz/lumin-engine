@@ -68,6 +68,7 @@ describe('requireCatalog', () => {
 
     expect(c.get('catalog')).toEqual(catalog);
     expect(next).toHaveBeenCalled();
+    expect(catalogs.getCatalog).toHaveBeenCalledWith(c.env.DB, 'user-1', 'cat-1');
   });
 
   it('returns 404 for another tenant catalog, never 403', async () => {

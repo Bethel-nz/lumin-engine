@@ -53,6 +53,8 @@ describe('catalog storage', () => {
 
     expect(catalog?.fields).toEqual(input.fields);
     expect(db.statement.bind).toHaveBeenCalledWith('cat-1', 'tenant-1');
+    const sql = db.prepare.mock.calls.at(-1)?.[0] ?? '';
+    expect(sql).toContain('tenant_id = ?');
   });
 
   it('returns null when no row is found', async () => {
@@ -84,6 +86,8 @@ describe('catalog storage', () => {
     expect(catalogs).toHaveLength(1);
     expect(catalogs[0].fields).toEqual(input.fields);
     expect(catalogs[0].embedConfig).toEqual(input.embed_config);
+    const sql = db.prepare.mock.calls.at(-1)?.[0] ?? '';
+    expect(sql).toContain('tenant_id = ?');
   });
 
   it('upserts the tenant idempotently', async () => {
