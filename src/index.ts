@@ -21,7 +21,7 @@ import {
 import { processCompensationQueue } from './services/compensation';
 import type { AppVariables, EnvBindings } from './types';
 
-const app = new Hono<{ Bindings: EnvBindings; Variables: AppVariables }>();
+export const app = new Hono<{ Bindings: EnvBindings; Variables: AppVariables }>();
 
 // CORS middleware
 app.use(
