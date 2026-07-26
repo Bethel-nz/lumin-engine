@@ -116,4 +116,37 @@ describe('createCatalogSchema', () => {
     });
     expect(parsed.embed_config.text_fields).toEqual(['title', 'description']);
   });
+
+  it('rejects a field named tenant_id', () => {
+    expect(() =>
+      createCatalogSchema.parse({
+        ...valid,
+        fields: [{ name: 'tenant_id', type: 'string' }],
+        embed_config: { text_fields: ['title'] },
+      })
+    ).toThrow();
+  });
+
+  it('rejects a field named attributes', () => {
+    expect(() =>
+      createCatalogSchema.parse({
+        ...valid,
+        fields: [{ name: 'attributes', type: 'string' }],
+        embed_config: { text_fields: ['title'] },
+      })
+    ).toThrow();
+  });
+
+  it('rejects an image_field naming a field that is neither core nor declared', () => {
+    expect(() =>
+      createCatalogSchema.parse({
+        ...valid,
+        fields: [{ name: 'brand', type: 'string' }],
+        embed_config: {
+          text_fields: ['title'],
+          image_field: 'photo',
+        },
+      })
+    ).toThrow();
+  });
 });

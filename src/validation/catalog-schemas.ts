@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 export const CORE_ITEM_FIELDS = [
+  'tenant_id',
+  'catalog_id',
   'item_id',
   'title',
   'description',
@@ -10,6 +12,9 @@ export const CORE_ITEM_FIELDS = [
   'price',
   'created_at',
   'updated_at',
+  'attributes',
+  'constructor',
+  'prototype',
 ] as const;
 
 const IDENTIFIER_REGEX = /^[a-z][a-z0-9_]*$/;
