@@ -27,6 +27,10 @@ schema deployment.
 
 ## Architecture
 
+For the complete system design, request sequences, consistency model, failure
+boundaries, and scaling path, read
+[`service-architecture.md`](./service-architecture.md).
+
 ```text
 API key
   └── tenant
@@ -191,6 +195,34 @@ curl \
   "http://localhost:8787/api/catalogs/$CATALOG_ID/users/demo-user/recommendations"
 ```
 
+## Live recommendation evaluation
+
+Run the recommendation loop against a fixed 32-item catalog through the real
+HTTP API:
+
+```bash
+bun run evaluate:recommendations
+```
+
+If Wrangler is running on a different port:
+
+```bash
+LUMIN_BASE_URL=http://127.0.0.1:8790 bun run evaluate:recommendations
+```
+
+The evaluator creates isolated science-fiction, romance, horror, family, and
+cold-start users. It reports Precision@5, cross-profile overlap, ranking
+stability, seen-item leakage, and whether replaying one interaction ID changes
+the number of signals learned by the recommendation profile.
+
+The ground-truth cluster label is stored for scoring but excluded from the
+embedding fields. Existing evaluation items are reused by default. Pass
+`--reseed` to regenerate their embeddings:
+
+```bash
+bun run evaluate:recommendations --reseed
+```
+
 ## API
 
 All `/api/catalogs/**` routes require an API key.
@@ -306,6 +338,7 @@ cd tinybird && tb build
 bunx wrangler d1 migrations apply lumin-db --local
 bun run dev
 bun run seed:movies
+bun run evaluate:recommendations
 ```
 
 `tb build` targets local development. Production Tinybird deployment and

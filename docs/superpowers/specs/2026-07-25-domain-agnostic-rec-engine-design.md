@@ -134,10 +134,17 @@ measured catalog size warrants it.
 
 ## Error handling
 
-Unchanged in shape. Tinybird ingestion failures enqueue compensation and still
-return 201; embedding failures fail the request; image fetch failures degrade to
-a text-only vector. A request naming an unknown catalog, or a catalog belonging
-to another tenant, is a 404 - not a 403, which would confirm the catalog exists.
+The implemented catalog path performs synchronous multi-store writes. Tinybird
+ingestion failures currently fail the request, while image fetch failures
+degrade to a text-only vector and complete embedding failures stop item
+ingestion. D1 and Upstash item upserts run in parallel, so one can succeed while
+the other fails. The legacy event path has compensation machinery, but the
+generic catalog path does not use it yet.
+
+The production hardening path is a D1 transactional outbox that makes derived
+Upstash and Tinybird writes replayable. A request naming an unknown catalog, or
+a catalog belonging to another tenant, is a 404 - not a 403, which would
+confirm that the catalog exists.
 
 ## Testing
 
