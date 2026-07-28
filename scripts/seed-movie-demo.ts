@@ -21,10 +21,13 @@ const request = async (
   return { response, body };
 };
 
-const seed = await request('/api/admin/seed', { method: 'POST' });
+const configuredApiKey = process.env.LUMIN_API_KEY;
+const seed = configuredApiKey
+  ? undefined
+  : await request('/api/admin/seed', { method: 'POST' });
 const apiKey =
-  process.env.LUMIN_API_KEY ||
-  (typeof seed.body.apiKey === 'string' ? seed.body.apiKey : undefined);
+  configuredApiKey ||
+  (typeof seed?.body.apiKey === 'string' ? seed.body.apiKey : undefined);
 
 if (!apiKey) throw new Error('The local seed endpoint did not return an API key.');
 

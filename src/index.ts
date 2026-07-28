@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { MiddlewareHandler } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { cors } from 'hono/cors';
 import { CONFIG } from './config';
@@ -33,7 +34,8 @@ app.use(
   })
 );
 
-type Limiter = ReturnType<typeof rateLimiter>;
+type AppEnv = { Bindings: EnvBindings; Variables: AppVariables };
+type Limiter = MiddlewareHandler<AppEnv>;
 
 const lazyLimiter = (create: () => Limiter): Limiter => {
   let limiter: Limiter | undefined;
@@ -70,7 +72,18 @@ const userRateLimiter = lazyLimiter(() =>
   })
 );
 
-app.use('*', globalRateLimiter);
+const isLocalDevelopmentRequest = (
+  c: Parameters<Limiter>[0]
+): boolean => {
+  if (c.env.ENVIRONMENT !== 'development') return false;
+
+  const hostname = new URL(c.req.url).hostname;
+  return hostname === 'localhost' || hostname === '127.0.0.1';
+};
+
+app.use('*', (c, next) =>
+  isLocalDevelopmentRequest(c) ? next() : globalRateLimiter(c, next)
+);
 
 // Better Auth endpoints
 app.on(['POST', 'GET'], '/api/auth/*', (c) => {
@@ -99,6 +112,10 @@ app.post('/api/admin/seed', async (c) => {
       userId: adminUserId,
       name: existing ? `local-demo-${Date.now()}` : 'admin-key',
       expiresIn: null,
+      // Local demo traffic is already protected by the route-level limiters.
+      // Disabling the API-key counter here avoids persisting a stale quota
+      // across dev-server restarts and repeated seeding.
+      rateLimitEnabled: false,
     },
   });
 
