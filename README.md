@@ -1,13 +1,19 @@
 # Lumin Engine
 
-Lumin is a tenant-isolated recommendation service for products that need
-personalized discovery without building their own embedding, ranking, and
-behavioral-learning infrastructure.
+Lumin is a tenant-isolated recommendation service that turns interaction history
+into a current model of a user's taste.
+
+The interesting problem is not finding items similar to one query. It is
+deciding which behavior should remain useful, which signals should fade, and how
+that learned preference should transfer to items the user has never seen. Lumin
+keeps that process explicit: interactions are weighted evidence, time decay
+changes their influence, and the resulting taste vector is derived state that
+can be rebuilt.
 
 A tenant registers a catalog, describes its domain-specific fields, and chooses
-which fields should shape an item's embedding. The same Lumin deployment can
-then serve movies, books, products, articles, listings, or events without a
-schema deployment.
+which fields shape an item's representation. The same deployment can then serve
+movies, books, products, articles, listings, or events without a schema
+deployment.
 
 ## What it does
 
