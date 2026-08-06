@@ -47,6 +47,12 @@ export const recommendationInputSchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
+export const analyticsInputSchema = z.object({
+  hours: z.coerce.number().int().positive().max(8_760).default(168),
+  bucket_hours: z.coerce.number().int().positive().max(168).default(24),
+  top_items_limit: z.coerce.number().int().min(1).max(20).default(5),
+});
+
 const validateAttributeValue = (
   value: unknown,
   type: Catalog['fields'][number]['type']

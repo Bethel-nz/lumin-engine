@@ -88,6 +88,28 @@ export const realtimeTrendingResponseSchema = z.object({
   engagement_score: z.number(),
 });
 
+export const catalogAnalyticsQuerySchema = z.object({
+  tenant_id: z.string().min(1),
+  catalog_id: z.string().min(1),
+  hours: z.number().int().positive().max(8_760).default(168),
+  bucket_hours: z.number().int().positive().max(168).default(24),
+});
+
+export const catalogAnalyticsResponseSchema = z.object({
+  bucket: z.number(),
+  interaction_count: z.number(),
+  active_user_count: z.number(),
+  view_count: z.number(),
+  click_count: z.number(),
+  like_count: z.number(),
+  save_count: z.number(),
+  complete_count: z.number(),
+  purchase_count: z.number(),
+  dismiss_count: z.number(),
+  dislike_count: z.number(),
+  engagement_score: z.number(),
+});
+
 export const userBehaviorQuerySchema = z.object({
   tenant_id: z.string().min(1),
   catalog_id: z.string().min(1),

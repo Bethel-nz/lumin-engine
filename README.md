@@ -325,6 +325,16 @@ and the sources that produced it.
 The response metadata reports `popular` or `personalized`,
 `learned_from_interactions`, and cache state.
 
+### Analytics
+
+`GET /api/catalogs/:catalogId/analytics?hours=168&bucket_hours=24&top_items_limit=5`
+
+Returns dashboard-ready, catalog-scoped activity from Tinybird: totals by
+action, a timestamped series with active users per bucket, and the most engaged
+items in the selected period. `hours` defaults to seven days and
+`bucket_hours` defaults to one day. Interaction IDs are deduplicated before
+they are counted, so Queue retries do not inflate the dashboard.
+
 ## Account and API-key lifecycle
 
 Lumin uses Better Auth's email/password flow:
@@ -413,6 +423,7 @@ TinyKit generates:
 - `user_interactions__v1`
 - `item_similarity__v1`
 - `facet_trends__v1`
+- `catalog_analytics__v1`
 
 Every datasource sorting key and every pipe predicate begins with
 `tenant_id, catalog_id`.

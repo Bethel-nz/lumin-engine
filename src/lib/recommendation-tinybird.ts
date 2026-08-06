@@ -5,6 +5,8 @@ import type {
   CatalogItemInput,
 } from '../validation/recommendation-schemas';
 import {
+  catalogAnalyticsQuerySchema,
+  catalogAnalyticsResponseSchema,
   catalogInteractionsDataSource,
   catalogInteractionsSchema,
   facetTrendResponseSchema,
@@ -23,6 +25,7 @@ import {
   userInteractionsQuerySchema,
 } from '../validation/recommendation-tinybird-schemas';
 import {
+  catalogAnalyticsPipe,
   facetTrendsPipe,
   itemSimilarityPipe,
   realtimeTrendingPipe,
@@ -37,6 +40,7 @@ const config = {
     interactions: catalogInteractionsDataSource,
   },
   pipes: {
+    catalogAnalytics: catalogAnalyticsPipe,
     trendingItems: trendingItemsPipe,
     realtimeTrending: realtimeTrendingPipe,
     userBehavior: userBehaviorPipe,
@@ -144,6 +148,16 @@ export const createRealtimeTrendingQuery = (
   });
   return (params: unknown) =>
     endpoint(realtimeTrendingQuerySchema.parse(params));
+};
+
+export const createCatalogAnalyticsQuery = (
+  tb: RecommendationTinybirdClient
+) => {
+  const endpoint = tb.pipe({
+    pipe: 'catalog_analytics__v1',
+    data: catalogAnalyticsResponseSchema,
+  });
+  return (params: unknown) => endpoint(catalogAnalyticsQuerySchema.parse(params));
 };
 
 export const createUserBehaviorQuery = (tb: RecommendationTinybirdClient) => {

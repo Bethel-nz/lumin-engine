@@ -110,6 +110,41 @@ export const realtimeTrendingPipe = definePipe({
     .limit(tpl.limit)
 );
 
+export const catalogAnalyticsPipe = definePipe({
+  name: 'catalog_analytics__v1',
+  schema: catalogInteractionsSchema,
+  parameters: defineParameters({
+    tenant_id: stringParam('tenant_id', { required: true }),
+    catalog_id: stringParam('catalog_id', { required: true }),
+    hours: int64Param('hours', { default: 168 }),
+    bucket_hours: int64Param('bucket_hours', { default: 24 }),
+  }),
+}).endpoint((_q, _params, tpl) =>
+  query(catalogInteractionsSchema)
+    .selectRaw(
+      `toUnixTimestamp(toStartOfInterval(fromUnixTimestamp64Milli(timestamp), INTERVAL ${tpl.bucket_hours} HOUR)) * 1000 AS bucket,
+       count() AS interaction_count,
+       uniqExact(user_id) AS active_user_count,
+       countIf(action = 'view') AS view_count,
+       countIf(action = 'click') AS click_count,
+       countIf(action = 'like') AS like_count,
+       countIf(action = 'save') AS save_count,
+       countIf(action = 'complete') AS complete_count,
+       countIf(action = 'purchase') AS purchase_count,
+       countIf(action = 'dismiss') AS dismiss_count,
+       countIf(action = 'dislike') AS dislike_count,
+       ${engagementScore('action')} AS engagement_score`
+    )
+    .from('interactions__v1')
+    .where(`tenant_id = ${tpl.tenant_id}`)
+    .and(`catalog_id = ${tpl.catalog_id}`)
+    .and(
+      `timestamp >= toUnixTimestamp64Milli(now64(3) - INTERVAL ${tpl.hours} HOUR)`
+    )
+    .groupBy('bucket')
+    .orderBy('bucket ASC')
+);
+
 export const userBehaviorPipe = definePipe({
   name: 'user_behavior__v1',
   schema: catalogInteractionsSchema,

@@ -1,11 +1,13 @@
 import type { Context } from 'hono';
 import type { AppVariables, EnvBindings } from '../types';
 import {
+  analyticsInputSchema,
   interactionInputSchema,
   parseCatalogItem,
   recommendationInputSchema,
   searchInputSchema,
 } from '../validation/recommendation-schemas';
+import { getCatalogAnalytics } from '../services/catalog-analytics';
 import {
   getCatalogItem,
   ingestCatalogItem,
@@ -161,5 +163,23 @@ export const recommendCatalogItemsRoute = async (c: AppContext) => {
     return c.json(response);
   } catch (error: unknown) {
     return handleError(c, error, 'Failed to recommend catalog items');
+  }
+};
+
+export const getCatalogAnalyticsRoute = async (c: AppContext) => {
+  const resolved = scope(c);
+  if (!resolved) return c.json({ error: 'Catalog not found' }, 404);
+
+  try {
+    const input = analyticsInputSchema.parse(c.req.query());
+    return c.json(
+      await getCatalogAnalytics(c, resolved.tenantId, resolved.catalog.id, {
+        hours: input.hours,
+        bucketHours: input.bucket_hours,
+        topItemsLimit: input.top_items_limit,
+      })
+    );
+  } catch (error: unknown) {
+    return handleError(c, error, 'Failed to load catalog analytics');
   }
 };

@@ -13,6 +13,7 @@ import {
 import { requireCatalog, resolveTenant } from './middleware/tenant';
 import {
   getCatalogItemRoute,
+  getCatalogAnalyticsRoute,
   ingestCatalogItemRoute,
   listCatalogItemsRoute,
   logCatalogInteractionRoute,
@@ -152,6 +153,13 @@ app.get(
   resolveTenant,
   requireCatalog,
   searchCatalogRoute
+);
+app.get(
+  '/api/catalogs/:catalogId/analytics',
+  requireApiKey,
+  resolveTenant,
+  requireCatalog,
+  getCatalogAnalyticsRoute
 );
 app.get(
   '/api/catalogs/:catalogId/users/:userId/recommendations',
