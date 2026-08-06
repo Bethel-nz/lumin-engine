@@ -18,7 +18,8 @@
     "METRICS_ENDPOINT": "https://...",
     "METRICS_TOKEN": "...",
     "BETTER_AUTH_SECRET": "generate-with-openssl-rand-base64-32",
-    "BETTER_AUTH_URL": "http://localhost:8787"
+    "BETTER_AUTH_URL": "http://localhost:8787",
+    "BETTER_AUTH_TRUSTED_ORIGINS": "http://localhost:3000"
   },
   "kv_namespaces": [
     {

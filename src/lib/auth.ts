@@ -1,10 +1,17 @@
+import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { apiKey } from "@better-auth/api-key";
-import * as schema from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
+import * as schema from "../db/schema";
+import type { EnvBindings } from "../types";
 
-export const getAuth = (db: D1Database) => {
+const trustedOrigins = (value?: string): string[] =>
+  (value ?? "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+export const getAuth = (db: D1Database, env: EnvBindings) => {
   return betterAuth({
     database: drizzleAdapter(drizzle(db, { schema }), {
       provider: "sqlite",
@@ -28,10 +35,7 @@ export const getAuth = (db: D1Database) => {
       max: 30,
       storage: "memory",
     },
-    trustedOrigins: [
-      "http://localhost:3000",
-      "https://synaxis-app.vercel.app",
-    ],
+    trustedOrigins: trustedOrigins(env.BETTER_AUTH_TRUSTED_ORIGINS),
   });
 };
 

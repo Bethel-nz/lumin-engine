@@ -92,7 +92,7 @@ app.use('*', (c, next) =>
 
 // Better Auth endpoints
 app.on(['POST', 'GET'], '/api/auth/*', (c) => {
-  const auth = getAuth(c.env.DB);
+  const auth = getAuth(c.env.DB, c.env);
   return auth.handler(c.req.raw);
 });
 
@@ -103,7 +103,7 @@ app.post('/api/admin/seed', async (c) => {
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const auth = getAuth(c.env.DB);
+  const auth = getAuth(c.env.DB, c.env);
   const adminUserId = await getOrCreateAdminUser(c.env.DB);
 
   const existing = await c.env.DB.prepare(

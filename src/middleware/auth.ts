@@ -17,7 +17,7 @@ export const requireApiKey = async (
   }
 
   try {
-    const auth = getAuth(c.env.DB);
+    const auth = getAuth(c.env.DB, c.env);
     const result = await auth.api.verifyApiKey({
       body: { key: apiKey },
     });

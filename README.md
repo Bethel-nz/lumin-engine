@@ -134,6 +134,7 @@ VECTOR_URL=<upstash vector REST URL>
 VECTOR_TOKEN=<upstash vector REST token>
 BETTER_AUTH_SECRET=<random 32-byte secret>
 BETTER_AUTH_URL=http://localhost:8787
+BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000,https://your-app.example
 ```
 
 Start and build Tinybird Local:
