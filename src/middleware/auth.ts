@@ -6,11 +6,13 @@ export const requireApiKey = async (
   c: Context<{ Bindings: EnvBindings; Variables: AppVariables }>,
   next: Next
 ) => {
+  const luminKey = c.req.header("X-Lumin-Key");
   const appKey = c.req.header("X-App-Key");
   const authHeader = c.req.header("Authorization");
   const xApiKey = c.req.header("X-Api-Key");
 
-  const apiKey = appKey || xApiKey || authHeader?.replace(/^Bearer\s+/i, "");
+  const apiKey =
+    luminKey || appKey || xApiKey || authHeader?.replace(/^Bearer\s+/i, "");
 
   if (!apiKey) {
     return c.json({ error: "Unauthorized: Missing API key" }, 401);

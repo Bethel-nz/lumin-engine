@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../db/schema";
 import type { EnvBindings } from "../types";
 
-const trustedOrigins = (value?: string): string[] =>
+export const getTrustedOrigins = (value?: string): string[] =>
   (value ?? "http://localhost:3000")
     .split(",")
     .map((origin) => origin.trim())
@@ -13,12 +13,35 @@ const trustedOrigins = (value?: string): string[] =>
 
 export const getAuth = (db: D1Database, env: EnvBindings) => {
   return betterAuth({
+    appName: "Lumin",
+    baseURL: env.BETTER_AUTH_URL,
+    secret: env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(drizzle(db, { schema }), {
       provider: "sqlite",
     }),
+    emailAndPassword: {
+      enabled: true,
+    },
+    user: {
+      deleteUser: {
+        enabled: true,
+        afterDelete: async (user) => {
+          await db.batch([
+            db.prepare("DELETE FROM apikey WHERE reference_id = ?").bind(user.id),
+            db.prepare("DELETE FROM catalog_outbox WHERE tenant_id = ?").bind(user.id),
+            db.prepare("DELETE FROM tenants WHERE id = ?").bind(user.id),
+          ]);
+        },
+      },
+    },
     plugins: [
       apiKey({
-        apiKeyHeaders: ["x-app-key", "x-api-key", "authorization"],
+        apiKeyHeaders: [
+          "x-lumin-key",
+          "x-app-key",
+          "x-api-key",
+          "authorization",
+        ],
         defaultPrefix: "lum_",
         minimumPrefixLength: 4,
         maximumPrefixLength: 16,
@@ -35,7 +58,7 @@ export const getAuth = (db: D1Database, env: EnvBindings) => {
       max: 30,
       storage: "memory",
     },
-    trustedOrigins: trustedOrigins(env.BETTER_AUTH_TRUSTED_ORIGINS),
+    trustedOrigins: getTrustedOrigins(env.BETTER_AUTH_TRUSTED_ORIGINS),
   });
 };
 

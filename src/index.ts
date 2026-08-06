@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { cors } from 'hono/cors';
 import { CONFIG } from './config';
-import { getAuth, getOrCreateAdminUser } from './lib/auth';
+import { getAuth, getOrCreateAdminUser, getTrustedOrigins } from './lib/auth';
 import { requireApiKey } from './middleware/auth';
 import {
   createCatalogRoute,
@@ -32,9 +32,18 @@ export const app = new Hono<{ Bindings: EnvBindings; Variables: AppVariables }>(
 app.use(
   '*',
   cors({
-    origin: ['http://localhost:3000', 'https://synaxis-app.vercel.app'],
+    origin: (origin, c) =>
+      getTrustedOrigins(c.env.BETTER_AUTH_TRUSTED_ORIGINS).includes(origin)
+        ? origin
+        : null,
     allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'X-App-Key', 'X-Api-Key', 'Authorization'],
+    allowHeaders: [
+      'Content-Type',
+      'X-Lumin-Key',
+      'X-App-Key',
+      'X-Api-Key',
+      'Authorization',
+    ],
     credentials: true,
   })
 );

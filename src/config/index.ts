@@ -37,8 +37,6 @@ export const CONFIG = {
     },
   } as const,
 
-  ALLOWED_ORIGINS: ['http://localhost:3000', 'https://synaxis-app.vercel.app'],
-
   AB_TEST_CONFIG: {
     GROUP_A: {
       initialTopK: 40,

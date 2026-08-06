@@ -172,11 +172,12 @@ The command creates a local-only API key, prints the catalog ID, and ingests the
 movies through the real HTTP API. The local seed endpoint returns `404` on any
 non-local hostname.
 
-Use the returned API key as `X-Api-Key`.
+Use the returned API key as `X-Lumin-Key`. `X-App-Key`, `X-Api-Key`, and a
+Bearer token in `Authorization` remain supported for compatibility.
 
 ```bash
 curl \
-  -H "X-Api-Key: $LUMIN_API_KEY" \
+  -H "X-Lumin-Key: $LUMIN_API_KEY" \
   "http://localhost:8787/api/catalogs/$CATALOG_ID/items"
 ```
 
@@ -185,7 +186,7 @@ Log a preference:
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
-  -H "X-Api-Key: $LUMIN_API_KEY" \
+  -H "X-Lumin-Key: $LUMIN_API_KEY" \
   "http://localhost:8787/api/catalogs/$CATALOG_ID/interactions" \
   -d '{
     "user_id": "demo-user",
@@ -199,7 +200,7 @@ Fetch the learned recommendations:
 
 ```bash
 curl \
-  -H "X-Api-Key: $LUMIN_API_KEY" \
+  -H "X-Lumin-Key: $LUMIN_API_KEY" \
   "http://localhost:8787/api/catalogs/$CATALOG_ID/users/demo-user/recommendations"
 ```
 
@@ -323,6 +324,22 @@ and the sources that produced it.
 
 The response metadata reports `popular` or `personalized`,
 `learned_from_interactions`, and cache state.
+
+## Account and API-key lifecycle
+
+Lumin uses Better Auth's email/password flow:
+
+- `POST /api/auth/sign-up/email` to create an account and session.
+- `POST /api/auth/sign-in/email` to start a session.
+- `POST /api/auth/api-key/create`, `GET /api/auth/api-key/list`,
+  `POST /api/auth/api-key/update`, and `POST /api/auth/api-key/delete` to
+  manage the signed-in account's API keys.
+- `POST /api/auth/delete-user` with the current password to delete the signed-in
+  account. This revokes its API keys and removes the account-owned catalog
+  records from D1.
+
+The full API key is returned only when it is created. Store it once, then send
+it as `X-Lumin-Key` on catalog API requests.
 
 ## Tinybird resources
 
