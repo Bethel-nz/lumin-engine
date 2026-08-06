@@ -5,10 +5,10 @@ import {
   getEmbeddingClient,
 } from '../lib/clients';
 import {
-  createCatalogInteractionIngestion,
-  createItemIngestion,
-  getRecommendationTinybirdClient,
-} from '../lib/recommendation-tinybird';
+  drainCatalogOutbox,
+  persistCatalogInteractionWithOutbox,
+  persistCatalogItemWithOutbox,
+} from './catalog-outbox';
 import type { AppVariables, EnvBindings } from '../types';
 import type {
   CatalogInteractionInput,
@@ -103,46 +103,6 @@ export const buildCatalogEmbeddingInput = (
   };
 };
 
-export const persistCatalogItem = async (
-  db: D1Database,
-  tenantId: string,
-  catalogId: string,
-  item: CatalogItemInput,
-  now: number
-) => {
-  await db
-    .prepare(
-      `INSERT INTO catalog_items
-       (tenant_id, catalog_id, item_id, title, description, tags, category,
-        image_url, price, attributes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(tenant_id, catalog_id, item_id) DO UPDATE SET
-         title = excluded.title,
-         description = excluded.description,
-         tags = excluded.tags,
-         category = excluded.category,
-         image_url = excluded.image_url,
-         price = excluded.price,
-         attributes = excluded.attributes,
-         updated_at = excluded.updated_at`
-    )
-    .bind(
-      tenantId,
-      catalogId,
-      item.item_id,
-      item.title,
-      item.description ?? null,
-      JSON.stringify(item.tags),
-      item.category ?? null,
-      item.image_url ?? null,
-      item.price ?? null,
-      JSON.stringify(item.attributes),
-      now,
-      now
-    )
-    .run();
-};
-
 export const getCatalogItem = async (
   db: D1Database,
   tenantId: string,
@@ -191,44 +151,28 @@ export const ingestCatalogItem = async (
 ) => {
   const now = Date.now();
   const embeddingClient = getEmbeddingClient(c);
-  const vectorIndex = getCatalogVectorIndex(c, tenantId, catalog.id);
-  const tinybird = getRecommendationTinybirdClient(c);
-  const ingestItem = createItemIngestion(tinybird);
   const { text, imageUrl } = buildCatalogEmbeddingInput(catalog, item);
 
-  const [embedding] = await Promise.all([
-    generateMultimodalEmbedding(
-      text,
-      imageUrl,
-      embeddingClient,
-      'RETRIEVAL_DOCUMENT'
-    ),
-    ingestItem(tenantId, catalog.id, item, now),
-  ]);
+  const embedding = await generateMultimodalEmbedding(
+    text,
+    imageUrl,
+    embeddingClient,
+    'RETRIEVAL_DOCUMENT'
+  );
 
   if (embedding.every((value) => value === 0)) {
     throw new Error('Failed to generate an item embedding');
   }
 
-  await Promise.all([
-    vectorIndex.upsert([
-      {
-        id: item.item_id,
-        vector: embedding,
-        metadata: {
-          item_id: item.item_id,
-          title: item.title,
-          description: item.description ?? '',
-          tags: item.tags,
-          category: item.category ?? '',
-          image_url: item.image_url ?? '',
-          price: item.price ?? 0,
-          attributes: item.attributes,
-        },
-      },
-    ]),
-    persistCatalogItem(c.env.DB, tenantId, catalog.id, item, now),
-  ]);
+  await persistCatalogItemWithOutbox(
+    c.env.DB,
+    tenantId,
+    catalog.id,
+    item,
+    embedding,
+    now
+  );
+  await drainCatalogOutbox(c.env, 1);
 
   return { itemId: item.item_id, indexedAt: now };
 };
@@ -270,37 +214,19 @@ export const recordCatalogInteraction = async (
   };
   const now = Date.now();
   const weight = actionWeight(interaction.action);
-  const tinybird = getRecommendationTinybirdClient(c);
-  const ingestInteraction = createCatalogInteractionIngestion(tinybird);
-
-  await Promise.all([
-    c.env.DB.prepare(
-      `INSERT INTO catalog_interactions
-       (id, tenant_id, catalog_id, user_id, item_id, action, weight, timestamp,
-        session_id, source, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO NOTHING`
-    )
-      .bind(
-        interaction.id,
-        tenantId,
-        catalogId,
-        interaction.user_id,
-        interaction.item_id,
-        interaction.action,
-        weight,
-        now,
-        interaction.session_id,
-        interaction.source,
-        interaction.metadata ? JSON.stringify(interaction.metadata) : null
-      )
-      .run(),
-    ingestInteraction(tenantId, catalogId, interaction, now),
-  ]);
+  await persistCatalogInteractionWithOutbox(
+    c.env.DB,
+    tenantId,
+    catalogId,
+    interaction,
+    weight,
+    now
+  );
 
   await c.env.CACHE.delete(
     `recs:${tenantId}:${catalogId}:${interaction.user_id}`
   );
+  await drainCatalogOutbox(c.env, 1);
 
   return { interactionId: publicInteractionId, weight };
 };

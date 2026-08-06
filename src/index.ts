@@ -20,6 +20,7 @@ import {
   searchCatalogRoute,
 } from './routes/recommendation-api';
 import type { AppVariables, EnvBindings } from './types';
+import { drainCatalogOutbox } from './services/catalog-outbox';
 
 export const app = new Hono<{ Bindings: EnvBindings; Variables: AppVariables }>();
 
@@ -186,4 +187,9 @@ app.get(
   recommendCatalogItemsRoute
 );
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled: (_event: ScheduledEvent, env: EnvBindings, ctx: ExecutionContext) => {
+    ctx.waitUntil(drainCatalogOutbox(env, 50));
+  },
+};

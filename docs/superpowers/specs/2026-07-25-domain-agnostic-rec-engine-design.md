@@ -134,17 +134,23 @@ measured catalog size warrants it.
 
 ## Error handling
 
-The implemented catalog path performs synchronous multi-store writes. Tinybird
-ingestion failures currently fail the request, while image fetch failures
-degrade to a text-only vector and complete embedding failures stop item
-ingestion. D1 and Upstash item upserts run in parallel, so one can succeed while
-the other fails. The legacy event path has compensation machinery, but the
-generic catalog path does not use it yet.
+D1 is the commit boundary. An item or interaction row and a `catalog_outbox`
+receipt are inserted in the same D1 batch. The request then attempts the
+derived Vector and Tinybird writes immediately. If either fails, the source
+record remains committed and the receipt stays pending with exponential
+backoff. A Cloudflare Worker cron drains pending receipts every five minutes.
+Successful receipts are deleted, keeping the table proportional to work that
+still needs delivery. A receipt moves to `failed` only after five attempts.
 
-The production hardening path is a D1 transactional outbox that makes derived
-Upstash and Tinybird writes replayable. A request naming an unknown catalog, or
-a catalog belonging to another tenant, is a 404 - not a 403, which would
-confirm that the catalog exists.
+This is deliberately not a distributed transaction. Vector upserts are
+idempotent by item ID and Tinybird pipes deduplicate interactions by their
+stable interaction ID, so replaying a partially delivered receipt converges
+the derived stores on the D1 record rather than rolling the source record back.
+An image fetch failure still degrades to a text-only embedding. A complete
+embedding failure happens before the D1 batch and therefore creates no item or
+outbox receipt. A request naming an unknown catalog, or a catalog belonging to
+another tenant, is a 404 rather than a 403, which would confirm that the
+catalog exists.
 
 ## Testing
 

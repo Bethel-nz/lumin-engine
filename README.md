@@ -50,6 +50,7 @@ API key
           │   ├── items__v1
           │   ├── interactions__v1
           │   └── catalog-scoped analytics pipes
+          ├── D1 outbox for replaying derived Vector and Tinybird writes
           └── Cloudflare KV recommendation cache
 ```
 
@@ -341,6 +342,7 @@ Every datasource sorting key and every pipe predicate begins with
 ```bash
 bun run tb:generate
 cd tinybird && tb build
+cp wrangler.jsonc.template wrangler.jsonc # first-time local setup
 bunx wrangler d1 migrations apply lumin-db --local
 bun run dev
 bun run seed:movies
@@ -356,6 +358,9 @@ Cloudflare deployment remain separate explicit operations.
   measurements justify it.
 - Popularity fallback is computed from D1. Tinybird powers the richer analytics
   surface rather than sitting in the request-critical recommendation path.
+- D1 commits an item or interaction together with its derived-write receipt.
+  Vector and Tinybird delivery is attempted immediately, then retried from the
+  outbox every five minutes if either service is unavailable.
 - The previous event-specific routes are not registered. Their source remains
   temporarily for migration history and can be deleted after downstream callers
   have moved to the catalog API.
