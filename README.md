@@ -341,6 +341,66 @@ Lumin uses Better Auth's email/password flow:
 The full API key is returned only when it is created. Store it once, then send
 it as `X-Lumin-Key` on catalog API requests.
 
+### From account to first authenticated request
+
+The account session is a browser cookie. The API key belongs to that account
+and becomes its tenant boundary, so a key can only see the catalogs its owner
+created. This is the smallest useful flow for a browser client or an API
+console:
+
+```bash
+export LUMIN_URL=http://localhost:8787
+
+# Creates the account and saves its session cookie locally.
+curl -sS -c lumin.cookies \
+  -X POST "$LUMIN_URL/api/auth/sign-up/email" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Ada",
+    "email": "ada@example.com",
+    "password": "choose-a-real-password"
+  }'
+
+# The key value is returned in this response once. Keep it outside source code.
+curl -sS -b lumin.cookies \
+  -X POST "$LUMIN_URL/api/auth/api-key/create" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "local development" }'
+```
+
+Use the returned `key` as `LUMIN_API_KEY`, then create a catalog with the
+first-class Lumin header:
+
+```bash
+curl -sS -X POST "$LUMIN_URL/api/catalogs" \
+  -H "Content-Type: application/json" \
+  -H "X-Lumin-Key: $LUMIN_API_KEY" \
+  -d '{
+    "name": "books",
+    "fields": [
+      { "name": "author", "type": "string" },
+      { "name": "genre", "type": "string" }
+    ],
+    "embed_config": {
+      "text_fields": ["title", "description", "author", "genre"]
+    }
+  }'
+```
+
+Manage keys from the signed-in session, never with another API key:
+
+```text
+GET  /api/auth/api-key/list
+POST /api/auth/api-key/update  { "keyId": "...", "name": "production" }
+POST /api/auth/api-key/delete  { "keyId": "..." }
+POST /api/auth/delete-user     { "password": "..." }
+```
+
+Use the `keyId` returned by `list` for updates and revocation. Account deletion
+also invalidates all of that account's keys and removes its D1 catalog records.
+`X-App-Key`, `X-Api-Key`, and `Authorization: Bearer <key>` remain supported
+for existing integrations; new integrations should use `X-Lumin-Key`.
+
 ## Tinybird resources
 
 TinyKit generates:
