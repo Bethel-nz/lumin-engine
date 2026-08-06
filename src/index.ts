@@ -21,6 +21,10 @@ import {
 } from './routes/recommendation-api';
 import type { AppVariables, EnvBindings } from './types';
 import { drainCatalogOutbox } from './services/catalog-outbox';
+import {
+  deliverCatalogInteraction,
+  type CatalogInteractionEvent,
+} from './services/catalog-interaction-events';
 
 export const app = new Hono<{ Bindings: EnvBindings; Variables: AppVariables }>();
 
@@ -191,5 +195,22 @@ export default {
   fetch: app.fetch,
   scheduled: (_event: ScheduledEvent, env: EnvBindings, ctx: ExecutionContext) => {
     ctx.waitUntil(drainCatalogOutbox(env, 50));
+  },
+  queue: async (
+    batch: MessageBatch<CatalogInteractionEvent>,
+    env: EnvBindings
+  ) => {
+    for (const message of batch.messages) {
+      try {
+        await deliverCatalogInteraction(env, message.body);
+        message.ack();
+      } catch (error) {
+        console.error('Failed to deliver catalog interaction', {
+          interactionId: message.body.interaction.id,
+          error,
+        });
+        message.retry();
+      }
+    }
   },
 };

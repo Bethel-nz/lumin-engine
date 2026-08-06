@@ -31,19 +31,3 @@ export const catalogItems = sqliteTable(
     }),
   ]
 );
-
-export const catalogInteractions = sqliteTable('catalog_interactions', {
-  id: text('id').primaryKey(),
-  tenantId: text('tenant_id').notNull(),
-  catalogId: text('catalog_id')
-    .notNull()
-    .references(() => catalogs.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull(),
-  itemId: text('item_id').notNull(),
-  action: text('action').notNull(),
-  weight: real('weight').notNull(),
-  timestamp: integer('timestamp').notNull(),
-  sessionId: text('session_id').notNull(),
-  source: text('source').notNull(),
-  metadata: text('metadata'),
-});

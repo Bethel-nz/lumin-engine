@@ -6,9 +6,14 @@ import {
 } from '../lib/clients';
 import {
   drainCatalogOutbox,
-  persistCatalogInteractionWithOutbox,
   persistCatalogItemWithOutbox,
 } from './catalog-outbox';
+import type { CatalogInteractionEvent } from './catalog-interaction-events';
+import {
+  createTrendingItemsQuery,
+  createUserInteractionsQuery,
+  getRecommendationTinybirdClient,
+} from '../lib/recommendation-tinybird';
 import type { AppVariables, EnvBindings } from '../types';
 import type {
   CatalogInteractionInput,
@@ -191,6 +196,20 @@ const actionWeight = (action: CatalogInteractionInput['action']): number => {
   return weights[action];
 };
 
+const weightForAction = (action: string): number =>
+  action in {
+    view: true,
+    click: true,
+    like: true,
+    dislike: true,
+    save: true,
+    dismiss: true,
+    purchase: true,
+    complete: true,
+  }
+    ? actionWeight(action as CatalogInteractionInput['action'])
+    : 0;
+
 export const recordCatalogInteraction = async (
   c: AppContext,
   tenantId: string,
@@ -214,20 +233,16 @@ export const recordCatalogInteraction = async (
   };
   const now = Date.now();
   const weight = actionWeight(interaction.action);
-  await persistCatalogInteractionWithOutbox(
-    c.env.DB,
+  await c.env.INTERACTION_EVENTS.send({
     tenantId,
     catalogId,
     interaction,
-    weight,
-    now
-  );
+    recordedAt: now,
+  } satisfies CatalogInteractionEvent);
 
   await c.env.CACHE.delete(
     `recs:${tenantId}:${catalogId}:${interaction.user_id}`
   );
-  await drainCatalogOutbox(c.env, 1);
-
   return { interactionId: publicInteractionId, weight };
 };
 
@@ -375,23 +390,27 @@ export const searchCatalog = async (
 };
 
 const getUserInteractions = async (
-  db: D1Database,
+  c: AppContext,
   tenantId: string,
   catalogId: string,
   userId: string
 ) => {
-  const result = await db
-    .prepare(
-      `SELECT item_id, action, weight, timestamp
-       FROM catalog_interactions
-       WHERE tenant_id = ? AND catalog_id = ? AND user_id = ?
-       ORDER BY timestamp DESC
-       LIMIT 200`
-    )
-    .bind(tenantId, catalogId, userId)
-    .all<InteractionRow>();
+  const query = createUserInteractionsQuery(
+    getRecommendationTinybirdClient({ env: c.env })
+  );
+  const result = await query({
+    tenant_id: tenantId,
+    catalog_id: catalogId,
+    user_id: userId,
+    limit: 200,
+  });
 
-  return result.results ?? [];
+  return result.data.map((interaction) => ({
+    item_id: interaction.item_id,
+    action: interaction.action,
+    weight: weightForAction(interaction.action),
+    timestamp: interaction.interaction_timestamp,
+  }));
 };
 
 const buildUserVector = async (
@@ -442,34 +461,30 @@ const buildUserVector = async (
 };
 
 const popularCatalogItems = async (
-  db: D1Database,
+  c: AppContext,
   tenantId: string,
   catalogId: string,
   limit: number
 ) => {
-  const result = await db
-    .prepare(
-      `SELECT i.tenant_id, i.catalog_id, i.item_id, i.title, i.description,
-              i.tags, i.category, i.image_url, i.price, i.attributes,
-              i.created_at, i.updated_at,
-              coalesce(sum(x.weight), 0) AS popularity
-       FROM catalog_items i
-       LEFT JOIN catalog_interactions x
-         ON x.tenant_id = i.tenant_id
-        AND x.catalog_id = i.catalog_id
-        AND x.item_id = i.item_id
-       WHERE i.tenant_id = ? AND i.catalog_id = ?
-       GROUP BY i.tenant_id, i.catalog_id, i.item_id
-       ORDER BY popularity DESC, i.updated_at DESC
-       LIMIT ?`
-    )
-    .bind(tenantId, catalogId, limit)
-    .all<CatalogItemRow & { popularity: number }>();
+  const query = createTrendingItemsQuery(
+    getRecommendationTinybirdClient({ env: c.env })
+  );
+  const trending = await query({
+    tenant_id: tenantId,
+    catalog_id: catalogId,
+    limit,
+    hours: 8760,
+    category: '',
+  });
 
-  return (result.results ?? []).map((row) => ({
-    ...toItem(row),
-    score: row.popularity,
-  }));
+  const items = await Promise.all(
+    trending.data.map(async (entry) => ({
+      item: await getCatalogItem(c.env.DB, tenantId, catalogId, entry.item_id),
+      score: entry.engagement_score,
+    }))
+  );
+
+  return items.flatMap(({ item, score }) => (item ? [{ ...item, score }] : []));
 };
 
 export const recommendCatalogItems = async (
@@ -484,7 +499,7 @@ export const recommendCatalogItems = async (
   if (cached) return JSON.parse(cached) as Record<string, unknown>;
 
   const interactions = await getUserInteractions(
-    c.env.DB,
+    c,
     tenantId,
     catalogId,
     userId
@@ -518,7 +533,7 @@ export const recommendCatalogItems = async (
     strategy = 'personalized';
   } else {
     const popular = await popularCatalogItems(
-      c.env.DB,
+      c,
       tenantId,
       catalogId,
       limit

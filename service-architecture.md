@@ -491,13 +491,14 @@ items__v1
 interactions__v1
 ```
 
-TinyKit defines and generates five scoped pipes:
+TinyKit defines and generates six scoped pipes:
 
 | Pipe | Purpose |
 | --- | --- |
 | `trending_items__v1` | Weighted engagement over a configurable time window |
 | `realtime_trending__v1` | Interaction velocity and engagement |
 | `user_behavior__v1` | Preferred categories for one user |
+| `user_interactions__v1` | Latest deduplicated signals for one user |
 | `item_similarity__v1` | Tag-overlap similarity |
 | `facet_trends__v1` | Trends within an arbitrary JSON attribute |
 
@@ -505,9 +506,11 @@ Pipes group interactions by ID before aggregation. Item queries use
 `argMax(..., updated_at)` to recover the current version from the append-only
 datasource.
 
-Tinybird answers product analytics questions. Upstash answers online
-nearest-neighbor retrieval. Keeping those roles separate prevents analytical
-queries from becoming a dependency of recommendation latency.
+Tinybird is both the append-only behaviour store and the analytics plane.
+On a recommendation cache miss, `user_interactions__v1` supplies the latest
+deduplicated signals; Lumin fetches their item vectors from Upstash and rebuilds
+the user's taste profile. Upstash still owns online nearest-neighbor retrieval,
+and D1 still owns current catalog-item state.
 
 ## 13. Caching and consistency
 
@@ -563,8 +566,8 @@ It does not yet provide an atomic distributed commit.
 - Image download failure: text-only embedding.
 - Embedding failure during item ingest: request fails before D1 item commit.
 - Query-embedding failure: search continues with the D1 lexical path.
-- Duplicate interaction ID: ignored by the online D1 profile.
-- Duplicate analytics row: deduplicated by Tinybird pipes.
+- Duplicate interaction ID: safely replayed by the Queue and deduplicated by
+  Tinybird pipes.
 - Cache miss or eviction: online recomputation.
 
 ### Partial-write risks
@@ -575,21 +578,19 @@ Item ingestion spans multiple external systems without an outbox:
 2. Upstash can accept a vector while the D1 upsert fails, or the reverse.
 3. A request can return failure after one parallel write already succeeded.
 
-Interaction ingestion has a similar boundary:
+Interaction ingestion takes a deliberately different path. It is high-volume,
+append-only behaviour, so writing each signal to D1 only to copy it into
+Tinybird later would make D1 the expensive middleman. The request validates the
+catalog item in D1, enqueues the stable event ID, invalidates the response
+cache, and returns. The Queue consumer sends the event to Tinybird. If delivery
+is retried, Tinybird query-time deduplication keeps the behaviour stream
+logically idempotent.
 
-1. D1 may commit while Tinybird fails.
-2. Tinybird may accept while D1 reports a failure.
-3. Cache invalidation happens only after both writes resolve.
-4. Reusing an interaction ID with a different payload is not rejected; D1
-   keeps the first row while Tinybird receives both deliveries before
-   query-time deduplication.
-
-The legacy event path contains compensation machinery, but the current generic
-catalog path does not use it. The production-grade solution is a D1 outbox:
+Item ingestion still needs a D1 outbox:
 
 ```text
 transaction:
-  write operational row
+  write current item row
   write outbox job
 
 background delivery:
@@ -598,8 +599,10 @@ background delivery:
   mark outbox job complete
 ```
 
-That gives every derived store a replayable source and lets the public API
-state whether an item is pending, indexed, or failed.
+That gives item ingestion a replayable source and lets the public API state
+whether an item is pending, indexed, or failed. A legacy D1 interaction table
+may remain during migration, but it receives no new events and should only be
+dropped after its contents have been backfilled and verified in Tinybird.
 
 ## 15. Scaling characteristics
 

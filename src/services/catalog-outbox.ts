@@ -1,14 +1,10 @@
 import { getCatalogVectorIndex } from "../lib/clients";
 import {
-	createCatalogInteractionIngestion,
 	createItemIngestion,
 	getRecommendationTinybirdClient,
 } from "../lib/recommendation-tinybird";
 import type { EnvBindings } from "../types";
-import type {
-	CatalogInteractionInput,
-	CatalogItemInput,
-} from "../validation/recommendation-schemas";
+import type { CatalogItemInput } from "../validation/recommendation-schemas";
 
 const MAX_ATTEMPTS = 5;
 const CLAIM_TIMEOUT_MS = 5 * 60_000;
@@ -20,13 +16,7 @@ type ItemPayload = {
 	indexedAt: number;
 };
 
-type InteractionPayload = {
-	kind: "interaction_ingest";
-	interaction: CatalogInteractionInput & { id: string };
-	recordedAt: number;
-};
-
-type CatalogOutboxPayload = ItemPayload | InteractionPayload;
+type CatalogOutboxPayload = ItemPayload;
 
 type OutboxRow = {
 	id: string;
@@ -75,36 +65,6 @@ const itemStatement = (
 			now,
 		);
 
-const interactionStatement = (
-	db: D1Database,
-	tenantId: string,
-	catalogId: string,
-	interaction: CatalogInteractionInput & { id: string },
-	weight: number,
-	now: number,
-) =>
-	db
-		.prepare(
-			`INSERT INTO catalog_interactions
-       (id, tenant_id, catalog_id, user_id, item_id, action, weight, timestamp,
-        session_id, source, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO NOTHING`,
-		)
-		.bind(
-			interaction.id,
-			tenantId,
-			catalogId,
-			interaction.user_id,
-			interaction.item_id,
-			interaction.action,
-			weight,
-			now,
-			interaction.session_id,
-			interaction.source,
-			interaction.metadata ? JSON.stringify(interaction.metadata) : null,
-		);
-
 const outboxStatement = (
 	db: D1Database,
 	id: string,
@@ -151,33 +111,6 @@ export const persistCatalogItemWithOutbox = async (
 				item,
 				embedding,
 				indexedAt: now,
-			},
-			now,
-		),
-	]);
-	return outboxId;
-};
-
-export const persistCatalogInteractionWithOutbox = async (
-	db: D1Database,
-	tenantId: string,
-	catalogId: string,
-	interaction: CatalogInteractionInput & { id: string },
-	weight: number,
-	now: number,
-) => {
-	const outboxId = `interaction:${interaction.id}`;
-	await db.batch([
-		interactionStatement(db, tenantId, catalogId, interaction, weight, now),
-		outboxStatement(
-			db,
-			outboxId,
-			tenantId,
-			catalogId,
-			{
-				kind: "interaction_ingest",
-				interaction,
-				recordedAt: now,
 			},
 			now,
 		),
@@ -281,12 +214,6 @@ const deliver = async (env: EnvBindings, row: OutboxRow) => {
 		return;
 	}
 
-	await createCatalogInteractionIngestion(tinybird)(
-		row.tenant_id,
-		row.catalog_id,
-		payload.interaction,
-		payload.recordedAt,
-	);
 };
 
 /**

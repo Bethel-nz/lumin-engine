@@ -44,7 +44,7 @@ API key
           ├── D1
           │   ├── catalog registry
           │   ├── item read model
-          │   └── scoped interaction history
+          │   └── item delivery outbox
           ├── Upstash Vector namespace: tenant_id:catalog_id
           ├── Tinybird
           │   ├── items__v1
@@ -306,7 +306,8 @@ The caller's `item_id` is the idempotency key across D1, Upstash, and Tinybird.
 }
 ```
 
-If `id` is omitted, Lumin generates one. Reusing an ID is safe in D1.
+If `id` is omitted, Lumin generates one. Reusing an ID is safe because
+Tinybird reads deduplicate the append-only event stream by that stable ID.
 
 ### Hybrid search
 
@@ -331,6 +332,7 @@ TinyKit generates:
 - `trending_items__v1`
 - `realtime_trending__v1`
 - `user_behavior__v1`
+- `user_interactions__v1`
 - `item_similarity__v1`
 - `facet_trends__v1`
 
@@ -343,6 +345,7 @@ Every datasource sorting key and every pipe predicate begins with
 bun run tb:generate
 cd tinybird && tb build
 cp wrangler.jsonc.template wrangler.jsonc # first-time local setup
+bunx wrangler queues create lumin-interactions # once per Cloudflare account
 bunx wrangler d1 migrations apply lumin-db --local
 bun run dev
 bun run seed:movies
@@ -356,11 +359,16 @@ Cloudflare deployment remain separate explicit operations.
 
 - Lexical search uses scoped D1 `LIKE`; add FTS only after catalog-size
   measurements justify it.
-- Popularity fallback is computed from D1. Tinybird powers the richer analytics
-  surface rather than sitting in the request-critical recommendation path.
-- D1 commits an item or interaction together with its derived-write receipt.
-  Vector and Tinybird delivery is attempted immediately, then retried from the
-  outbox every five minutes if either service is unavailable.
+- Tinybird owns the append-only interaction history. A recommendation cache
+  miss asks `user_interactions__v1` for the user's latest deduplicated signals,
+  then rebuilds their taste vector from the associated Upstash item vectors.
+  The popularity fallback uses `trending_items__v1` and hydrates current item
+  details from D1.
+- Interaction delivery is Queue → Tinybird, not D1. The stable interaction ID
+  makes at-least-once Queue delivery safe. D1's outbox remains for item writes,
+  where a single request must coordinate D1, Vector, and Tinybird.
+- Existing `catalog_interactions` rows are legacy data. Backfill and verify
+  them in Tinybird before dropping that old D1 table from a deployed database.
 - The previous event-specific routes are not registered. Their source remains
   temporarily for migration history and can be deleted after downstream callers
   have moved to the catalog API.

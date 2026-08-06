@@ -19,6 +19,8 @@ import {
   trendingItemsQuerySchema,
   userBehaviorQuerySchema,
   userBehaviorResponseSchema,
+  userInteractionResponseSchema,
+  userInteractionsQuerySchema,
 } from '../validation/recommendation-tinybird-schemas';
 import {
   facetTrendsPipe,
@@ -26,6 +28,7 @@ import {
   realtimeTrendingPipe,
   trendingItemsPipe,
   userBehaviorPipe,
+  userInteractionsPipe,
 } from './recommendation-pipes';
 
 const config = {
@@ -37,6 +40,7 @@ const config = {
     trendingItems: trendingItemsPipe,
     realtimeTrending: realtimeTrendingPipe,
     userBehavior: userBehaviorPipe,
+    userInteractions: userInteractionsPipe,
     itemSimilarity: itemSimilarityPipe,
     facetTrends: facetTrendsPipe,
   },
@@ -148,6 +152,17 @@ export const createUserBehaviorQuery = (tb: RecommendationTinybirdClient) => {
     data: userBehaviorResponseSchema,
   });
   return (params: unknown) => endpoint(userBehaviorQuerySchema.parse(params));
+};
+
+export const createUserInteractionsQuery = (
+  tb: RecommendationTinybirdClient
+) => {
+  const endpoint = tb.pipe({
+    pipe: 'user_interactions__v1',
+    data: userInteractionResponseSchema,
+  });
+  return (params: unknown) =>
+    endpoint(userInteractionsQuerySchema.parse(params));
 };
 
 export const createItemSimilarityQuery = (

@@ -99,6 +99,20 @@ export const userBehaviorResponseSchema = z.object({
   preferred_categories: z.array(z.string()),
 });
 
+export const userInteractionsQuerySchema = z.object({
+  tenant_id: z.string().min(1),
+  catalog_id: z.string().min(1),
+  user_id: z.string().min(1),
+  limit: z.number().int().min(1).max(200).default(200),
+});
+
+export const userInteractionResponseSchema = z.object({
+  id: z.string(),
+  item_id: z.string(),
+  action: z.string(),
+  interaction_timestamp: z.number(),
+});
+
 export const itemSimilarityQuerySchema = z.object({
   tenant_id: z.string().min(1),
   catalog_id: z.string().min(1),

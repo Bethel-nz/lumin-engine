@@ -155,6 +155,29 @@ export const userBehaviorPipe = definePipe({
     )`)
 );
 
+export const userInteractionsPipe = definePipe({
+  name: 'user_interactions__v1',
+  schema: catalogInteractionsSchema,
+  parameters: defineParameters({
+    tenant_id: stringParam('tenant_id', { required: true }),
+    catalog_id: stringParam('catalog_id', { required: true }),
+    user_id: stringParam('user_id', { required: true }),
+    limit: int64Param('limit', { default: 200 }),
+  }),
+}).endpoint((_q, _params, tpl) =>
+  query(catalogInteractionsSchema)
+    .selectRaw(
+      'id, argMax(item_id, timestamp) AS item_id, argMax(action, timestamp) AS action, max(timestamp) AS interaction_timestamp'
+    )
+    .from('interactions__v1')
+    .where(`tenant_id = ${tpl.tenant_id}`)
+    .and(`catalog_id = ${tpl.catalog_id}`)
+    .and(`user_id = ${tpl.user_id}`)
+    .groupBy('id')
+    .orderBy('interaction_timestamp DESC')
+    .limit(tpl.limit)
+);
+
 export const itemSimilarityPipe = definePipe({
   name: 'item_similarity__v1',
   schema: itemsSchema,

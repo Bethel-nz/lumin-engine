@@ -34,6 +34,22 @@
       "migrations_dir": "migrations"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "INTERACTION_EVENTS",
+        "queue": "lumin-interactions"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "lumin-interactions",
+        "max_batch_size": 25,
+        "max_batch_timeout": 5,
+        "max_retries": 5
+      }
+    ]
+  },
   "observability": {
     "enabled": true
   },

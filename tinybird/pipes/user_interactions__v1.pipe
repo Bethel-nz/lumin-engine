@@ -1,0 +1,11 @@
+NODE endpoint
+SQL >
+    %
+    SELECT id, argMax(item_id, timestamp) AS item_id, argMax(action, timestamp) AS action, max(timestamp) AS interaction_timestamp
+    FROM interactions__v1
+    WHERE tenant_id = {{ String(tenant_id, required=True) }} AND catalog_id = {{ String(catalog_id, required=True) }} AND user_id = {{ String(user_id, required=True) }}
+    GROUP BY id
+    ORDER BY interaction_timestamp DESC
+    LIMIT {{ Int64(limit, 200) }}
+
+TYPE endpoint

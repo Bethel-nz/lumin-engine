@@ -1,6 +1,7 @@
 export interface EnvBindings {
   DB: D1Database;
   CACHE: KVNamespace;
+  INTERACTION_EVENTS: Queue<import('../services/catalog-interaction-events').CatalogInteractionEvent>;
   /** @deprecated Legacy event scheduler binding; no longer wired at runtime. */
   TAG_VECTORS_KV: KVNamespace;
   VECTOR_URL: string;
