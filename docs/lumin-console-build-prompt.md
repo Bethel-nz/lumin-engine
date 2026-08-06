@@ -191,7 +191,53 @@ Define these exactly as CSS custom properties on `:root`. Do not invent values o
 }
 ```
 
-**Dark mode is required**, and must respond to *both* `@media (prefers-color-scheme: dark)` and a manual `[data-theme="dark"]` attribute on `<html>`, so a toggle can override the OS. Invert the background and text ramps; keep `--primary-base` recognisable (lighten toward `#9670ff` if contrast requires it) and re-check every pair.
+**Dark mode is required.** Apply this block from *both* `@media (prefers-color-scheme: dark)` and a manual `[data-theme="dark"]` attribute on `<html>`, so a toggle can override the OS preference. Use these exact values — do not derive your own:
+
+```css
+/* Applies at both @media (prefers-color-scheme: dark) and [data-theme="dark"] */
+--bg-default: #171717;
+--bg-surface: #1c1c1c;
+--bg-light:   #1c1c1c;
+--bg-layer:   #292929;
+--bg-subtle:  #333333;
+--bg-muted:   #5c5c5c;
+
+--text-strong:   #ffffff;
+--text-sub:      #a3a3a3;
+--text-soft:     #7b7b7b;
+--text-disabled: #5c5c5c;
+--text-inverse:  #171717;
+--text-accent:   #8c71f6;
+
+--stroke-soft:   rgba(255, 255, 255, 0.05);
+--stroke-medium: rgba(255, 255, 255, 0.10);
+--stroke-strong: rgba(255, 255, 255, 0.20);
+
+--primary-dark:  #8c71f6;
+--primary-base:  #7d52f4;
+--primary-faint: rgba(125, 82, 244, 0.24);
+--primary-mute:  rgba(125, 82, 244, 0.16);
+
+--info-dark: #6895ff;  --info-base: #335cff;
+--info-faint: rgba(51, 92, 255, 0.24);  --info-mute: rgba(51, 92, 255, 0.16);
+
+--success-dark: #3ee089;  --success-base: #1daf61;
+--success-faint: rgba(31, 193, 107, 0.24);  --success-mute: rgba(31, 193, 107, 0.16);
+
+--warning-dark: #ffa468;  --warning-base: #e16614;
+--warning-faint: rgba(250, 115, 25, 0.24);  --warning-mute: rgba(250, 115, 25, 0.16);
+
+--error-dark: #ff6875;  --error-base: #e93544;
+--error-faint: rgba(251, 55, 72, 0.24);  --error-mute: rgba(251, 55, 72, 0.16);
+
+--focus-active: 0 0 0 2px var(--bg-default), 0 0 0 4px rgba(125, 82, 244, 0.32);
+```
+
+Three things about this inversion that are easy to get wrong:
+
+1. **`dark` and `base` swap roles.** In light mode `--primary-dark` is the deepest shade; in dark mode it becomes the *lighter* accent (`#8c71f6`) used for text and icons on dark surfaces. `--primary-base` stays `#7d52f4` in both, so the brand colour never shifts.
+2. **`faint` and `mute` become translucent.** In light mode they are pale tints; in dark mode they are the base colour at 24% and 16% alpha, so they pick up whatever surface sits behind them instead of flattening into grey.
+3. **Backgrounds get lighter as they layer upward**, the opposite of light mode. `--bg-default` `#171717` is the page; `--bg-layer` `#292929` is a raised card. Do not add shadows to simulate elevation on dark — raise the surface value instead.
 
 **Monospace is meaningful, not decorative.** Use `--font-mono` for exactly these: IDs (`item_id`, `catalog_id`, `user_id`), API keys, scores, JSON, and endpoint paths. Everything else is `--font-sans`.
 
