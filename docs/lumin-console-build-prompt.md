@@ -26,7 +26,40 @@ Lumin's documentation reads like this:
 
 Declarative. Precise. Explains the *why*, names its own limitations, never sells. No exclamation marks, no "Oops!", no "Let's get started!", no emoji anywhere in the product surface.
 
-Match this in every string you write.
+Match this in every string you write. Interface copy is part of the build, not a pass at the end — write the real string the first time.
+
+### Terminology — one word per concept, everywhere
+
+Interface copy, error messages, table headers, and API-facing labels all use the same word for the same thing. If it is a "catalog" in the navigation, it is not a "collection" in a toast. Fix the vocabulary before you write a single screen:
+
+| Use | Never | Meaning |
+| --- | --- | --- |
+| catalog | collection, dataset, index, workspace | The registered container for a set of items |
+| item | record, entry, document, product, row | One thing Lumin can rank |
+| field | column, property, key | A declared attribute on a catalog |
+| embed config | embedding settings, vectorisation config | Which fields shape an item's meaning |
+| interaction | event, signal, activity, engagement | One recorded user action on an item |
+| action | interaction type, event type, verb | `like`, `view`, `dismiss`, and the rest |
+| weight | strength, importance, value | The numeric influence of an action |
+| taste vector | user profile, preference model, embedding | The derived representation of a user |
+| strategy | mode, algorithm, method | `popular` or `personalized` |
+| score | similarity, relevance, rank, match | The cosine similarity of an item |
+| API key | token, secret, credential | The `X-Lumin-Key` value |
+| ingest | upload, import, add, push | Writing an item into a catalog |
+| record | log, track, send, capture | Writing an interaction |
+
+`ingest` and `record` are deliberately different verbs for deliberately different operations — items are ingested, interactions are recorded. Keep them apart.
+
+### Tone flexes with the stakes, voice does not
+
+| Context | Tone |
+| --- | --- |
+| Empty states, first-run, successful ingest | Warm, plain, brief. Never jokey. |
+| Routine actions, tables, filters, navigation | Neutral and minimal. Say the thing. |
+| Errors, revoking a key, deleting a catalog | Calm and literal. Zero playfulness, no apology. |
+| Anything revealing a key, or deleting data | Serious and explicit about what happens and what cannot be undone. |
+
+Lumin's voice is constant across all four. Only the temperature changes.
 
 ### Copy rules
 
@@ -43,8 +76,41 @@ Match this in every string you write.
   > `Ingest item`
 - **Search and filter empty states name the query and offer an exit**: "No results for 'quiet space mystery'. `Clear search`"
 - **Links describe their destination.** "Read the interaction weights" — never "Learn more" or "Click here".
-- **Never build sentences by concatenation.** Use full templated strings with proper pluralization: `{count, plural, one {# interaction} other {# interactions}}`, not `"Learned from " + n + " interactions"`.
-- **Placeholders show format, never replace a label.** Every field keeps a visible `<label for>`.
+- **Never build sentences by concatenation.** Use full templated strings with proper pluralization: `{count, plural, one {# interaction} other {# interactions}}`, not `"Learned from " + n + " interactions"`. Word order changes between languages; a sentence assembled from fragments cannot be translated.
+- **Placeholders show format, never replace a label.** Every field keeps a visible `<label for>`. `book-42` is a placeholder; `Item ID` is the label.
+- **Match the verb to the input device.** This console is pointer-first, so "click" is fine — but where a control is reachable both ways, prefer "select". Never write "tap" on a desktop surface.
+- **One vocabulary per flow.** The catalog creation flow enters with `Register catalog`, advances with `Continue` (never alternating with "Next"), and finishes with `Register catalog`. Alternating synonyms makes people wonder whether the buttons differ.
+- **Toggles are labelled for what happens when they are on.** `Use dark theme`, not `Disable light theme`. Never label the negative — it makes the off state a double negative.
+- **Link to a setting rather than describing the route to it.** A `Manage API keys` link, not "Go to Settings → Keys".
+- **Hints appear before the mistake, not after.** The rule that an attribute must be declared on the catalog belongs beside the attributes input while it is being filled in — not in an error after submit.
+- **Phrase hints positively.** "Use lowercase letters, numbers, and underscores", not "Don't use spaces or capitals".
+- **Use possessives sparingly.** `Catalogs`, not `Your catalogs`. `API keys`, not `Your API keys`.
+- **Never say "we" in an error.** "Unable to reach the API" — not "We couldn't reach the API", which reads as deflection and hides the recovery step.
+- **Do not park persistent information in an empty state.** The interaction weights table and the explanation of embed config must live somewhere permanent; an empty state vanishes the moment data exists.
+- **If one error keeps firing, the interaction is wrong.** An undeclared-attribute error that users hit repeatedly means the ingest form should be generated from the catalog's declared fields — which section 5.4 already requires. Redesign before rewording.
+
+### Worked strings
+
+Use these verbatim where they fit, and match their register everywhere else.
+
+| Situation | Write |
+| --- | --- |
+| Catalog list, empty | **No catalogs yet** / A catalog describes the shape of your items and how they are embedded. / `Register catalog` |
+| Items table, empty | **No items yet** / Items are what Lumin ranks. Ingest one to see recommendations change. / `Ingest item` |
+| Search, no results | No results for "quiet space mystery". / `Clear search` |
+| Recommendations, cold start | No interactions yet for this user. Showing catalog popularity. / `Record an interaction` |
+| Undeclared attribute | Declare `author` in the catalog's fields before using it as an attribute. |
+| Field name collides with a core column | `title` is a core field. Choose a different name. |
+| Embed config references a missing field | `mood` is not a declared field on this catalog. Add it, or remove it from the embed config. |
+| API unreachable | Unable to reach the API. Check that the worker is running, then retry. |
+| Key revealed once | Copy this key now. It is not shown again. |
+| Revoke confirmation | **Revoke this key?** / Requests using it will fail immediately. / `Revoke key` · `Cancel` |
+| Delete catalog confirmation | **Delete this catalog?** / Its items, interactions, and vectors are removed. This cannot be undone. / `Delete catalog` · `Cancel` |
+| Ingest succeeded | Ingested `book-42`. |
+| Interaction recorded | Recorded `like` on `book-42`. Weight 2.0. |
+| Strategy explanation, inline | Personalized ranking from {count, plural, one {# interaction} other {# interactions}}. |
+
+Note what these avoid: no "Success!", no "Whoops", no "Are you sure?", no "Something went wrong". Every error names the thing that failed and the next move.
 
 ## 3. Theme
 
@@ -331,4 +397,10 @@ Next.js App Router, TypeScript, Tailwind CSS v4 with the tokens above defined as
 - Light and dark mode both verified, via OS preference and the manual toggle.
 - Reflows at 320px and remains usable at 200% zoom.
 - No raw hex in components; every colour references a token.
-- No string built by concatenation around a variable.
+- No string built by concatenation around a variable; counts use pluralized templates.
+- Every concept uses its one approved term from section 2. Grep the source for the banned words — `collection`, `dataset`, `record` as a noun, `event`, `signal`, `user profile`, `match`, `confidence`, `token` for API key — and fix each hit.
+- Every button label starts with a verb. No `OK`, `Submit`, `Yes`, or `No` anywhere.
+- Every destructive dialog names its consequence in the confirming button.
+- Sentence case throughout; grep for Title Case in buttons and headings.
+- Every field has a visible label; no placeholder is doing a label's job.
+- No exclamation marks, no "oops", no emoji in any user-facing string.
