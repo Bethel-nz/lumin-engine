@@ -168,9 +168,9 @@ The included seed creates one movie catalog and twelve fictional films:
 bun run seed:movies
 ```
 
-The command creates a local-only API key, prints the catalog ID, and ingests the
-movies through the real HTTP API. The local seed endpoint returns `404` on any
-non-local hostname.
+The command creates a fresh local account and API key through the normal auth
+endpoints, prints the catalog ID, and ingests the movies through the real HTTP
+API. There is no administrative seed endpoint in the Worker.
 
 Use the returned API key as `X-Lumin-Key`. `X-App-Key`, `X-Api-Key`, and a
 Bearer token in `Authorization` remain supported for compatibility.

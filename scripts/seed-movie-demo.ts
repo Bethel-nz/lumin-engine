@@ -1,4 +1,4 @@
-export {};
+import { createLocalApiKey } from './local-auth';
 
 const baseUrl = process.env.LUMIN_BASE_URL ?? 'http://localhost:8787';
 
@@ -22,14 +22,9 @@ const request = async (
 };
 
 const configuredApiKey = process.env.LUMIN_API_KEY;
-const seed = configuredApiKey
-  ? undefined
-  : await request('/api/admin/seed', { method: 'POST' });
 const apiKey =
   configuredApiKey ||
-  (typeof seed?.body.apiKey === 'string' ? seed.body.apiKey : undefined);
-
-if (!apiKey) throw new Error('The local seed endpoint did not return an API key.');
+  (await createLocalApiKey(baseUrl, 'movie demo')).apiKey;
 
 const catalogDefinition = {
   name: 'movie-demo',

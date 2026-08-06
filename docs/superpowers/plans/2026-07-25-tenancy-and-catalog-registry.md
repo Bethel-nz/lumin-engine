@@ -911,7 +911,7 @@ Wait for `Ready on http://localhost:8787`.
 
 - [ ] **Step 2: Register a catalog**
 
-Using the seeded key from `POST /api/admin/seed`:
+Using an API key created through the normal local sign-up and API-key flow:
 
 ```bash
 curl -s -X POST http://localhost:8787/api/catalogs -H "Content-Type: application/json" -H "X-Api-Key: $LUMIN_KEY" -d '{"name":"products","fields":[{"name":"brand","type":"string"}],"embed_config":{"text_fields":["title","description","brand"],"image_field":"image_url"}}'

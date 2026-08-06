@@ -1,4 +1,4 @@
-export {};
+import { createLocalApiKey } from './local-auth';
 
 type EvaluationCluster =
   | 'science-fiction'
@@ -345,16 +345,7 @@ const catalogDefinition = {
 
 const getApiKey = async () => {
   if (process.env.LUMIN_API_KEY) return process.env.LUMIN_API_KEY;
-
-  const seeded = await request<{
-    apiKey?: string;
-    error?: string;
-  }>('/api/admin/seed', { method: 'POST' });
-  const body = requireSuccess('Local API-key seed', seeded);
-  if (!body.apiKey) {
-    throw new Error('The local seed endpoint did not return an API key.');
-  }
-  return body.apiKey;
+  return (await createLocalApiKey(baseUrl, 'recommendation evaluator')).apiKey;
 };
 
 const getOrCreateCatalog = async (apiKey: string) => {

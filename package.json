@@ -12,7 +12,6 @@
     "tb:deploy": "bun run tb:generate && bun run tb:push",
     "auth:generate": "bun x @better-auth/cli generate",
     "auth:migrate": "bun x @better-auth/cli migrate",
-    "seed": "curl -X POST http://localhost:8787/api/admin/seed",
     "seed:movies": "bun scripts/seed-movie-demo.ts",
     "evaluate:recommendations": "bun scripts/evaluate-recommendations.ts"
   },

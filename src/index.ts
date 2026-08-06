@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from 'hono';
 import { rateLimiter } from 'hono-rate-limiter';
 import { cors } from 'hono/cors';
 import { CONFIG } from './config';
-import { getAuth, getOrCreateAdminUser, getTrustedOrigins } from './lib/auth';
+import { getAuth, getTrustedOrigins } from './lib/auth';
 import { requireApiKey } from './middleware/auth';
 import {
   createCatalogRoute,
@@ -103,44 +103,6 @@ app.use('*', (c, next) =>
 app.on(['POST', 'GET'], '/api/auth/*', (c) => {
   const auth = getAuth(c.env.DB, c.env);
   return auth.handler(c.req.raw);
-});
-
-// One-time admin seed: creates the first admin user + API key
-app.post('/api/admin/seed', async (c) => {
-  const hostname = new URL(c.req.url).hostname;
-  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-    return c.json({ error: 'Not found' }, 404);
-  }
-
-  const auth = getAuth(c.env.DB, c.env);
-  const adminUserId = await getOrCreateAdminUser(c.env.DB);
-
-  const existing = await c.env.DB.prepare(
-    'SELECT id FROM `apikey` WHERE reference_id = ? LIMIT 1'
-  )
-    .bind(adminUserId)
-    .first<{ id: string }>();
-
-  const key = await auth.api.createApiKey({
-    body: {
-      userId: adminUserId,
-      name: existing ? `local-demo-${Date.now()}` : 'admin-key',
-      expiresIn: null,
-      // Local demo traffic is already protected by the route-level limiters.
-      // Disabling the API-key counter here avoids persisting a stale quota
-      // across dev-server restarts and repeated seeding.
-      rateLimitEnabled: false,
-    },
-  });
-
-  return c.json({
-    message: existing
-      ? 'A new local demo key was created.'
-      : 'Admin seeded successfully',
-    adminUserId,
-    apiKey: key.key,
-    warning: 'Store this key securely. It will not be shown again.',
-  });
 });
 
 // Public routes
